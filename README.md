@@ -1,4 +1,129 @@
 # AvailCal
 
-Aggregate calendar availability from many accounts into one private free/busy
-ICS feed. (README is completed in Phase 7.)
+Aggregate calendar availability from many accounts — Google, Outlook/M365,
+iCloud/Fastmail, plus **device-bound work accounts behind Conditional Access** —
+into a **single private free/busy ICS feed** you subscribe to for personal
+planning. Read-only, private, never shared externally.
+
+> **Privacy by construction, with source attribution.** AvailCal ingests **only
+> busy intervals** — `start` / `end` / `status` plus a **single owner-assigned
+> one-word source label**. Titles, descriptions, attendees and locations are
+> stripped at the earliest point. The label becomes each event's `SUMMARY`
+> (and `CATEGORIES`) so you can still tell *which* calendar a block came from —
+> a coarse tag like `Work`, `Perso`, `iCloud`, never event content.
+
+## How it works (Model B: scale-to-zero)
+
+```
+Cloud-reachable accounts ─(secret ICS URL / CalDAV)─┐
+                                                     ├─► Container Apps Job (cron, scale-to-zero)
+Device-bound accounts ─(local agent → /raw JSON)─────┘     pull → normalize → merge → emit
+                                                            ▼
+                                    Blob:  /raw/*.json  +  /merged/availability.ics  +  /raw/*.ics
+                                                            ▼
+                          Apple Calendar / Thunderbird / Fantastical  (ICS subscription, hourly)
+```
+
+A scheduled **Azure Container Apps Job** (hourly cron, no always-on server)
+pulls every source, normalizes all times to **UTC**, merges per-source busy
+blocks, and writes one merged `availability.ics` to blob storage. Your calendar
+clients subscribe to that blob. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+The only bespoke code is the **device-bound local reads** (agents) and the
+**free/busy merge**. Everything else reuses existing tools: `recurring-ical-events`
+(recurrence), `vdirsyncer` (CalDAV), `icalendar` (parse/emit), native OS calendar
+stores (device reads), OS schedulers (agents), and Container Apps (cloud timer).
+
+## Repository layout
+
+| Path | What |
+| --- | --- |
+| `merge/` | The Python merge job (pull → normalize → merge → emit) + `Dockerfile` |
+| `agents/windows/` | Outlook COM exporter + Scheduled Task installer |
+| `agents/macos/` | EventKit exporter + launchd agent installer |
+| `infra/` | Bicep for Storage, Key Vault, and the scheduled Container Apps Job |
+| `.github/workflows/` | CI (lint/test/build) and OIDC deploy |
+| `docs/` | Architecture, getting ICS URLs, subscribing, and the runbook |
+| `sources.example.toml` | The source registry (rawname → one-word label) |
+
+## Quick start (clone → deployed)
+
+### 0. Prerequisites
+- Python 3.12, Docker, and the Azure CLI (`az`) with the Bicep extension.
+- An Azure subscription and an Azure Container Registry (ACR).
+
+### 1. Run the tests locally
+```bash
+cd merge
+pip install -e '.[dev]'
+ruff check .
+pytest -q
+```
+
+### 2. Define your sources
+Copy `sources.example.toml` to `sources.toml` and map each raw input (ICS feed,
+CalDAV account, device calendar name) to a **single-word label**. Labels must be
+unique single tokens — the job validates this at startup and fails fast.
+
+### 3. Collect your secret feed URLs
+Follow [docs/GET-ICS-URLS.md](docs/GET-ICS-URLS.md) to obtain each account's
+secret ICS URL (Google secret-iCal, Outlook published ICS) or set up CalDAV
+(iCloud/Fastmail via `vdirsyncer`). Work accounts that block published ICS use
+the **device agents** instead.
+
+### 4. Try it locally against your sources (optional)
+```bash
+cd merge
+AVAILCAL_SOURCES_TOML=../sources.toml \
+AVAILCAL_ICS_FEEDS='GoogPersonal=https://…/basic.ics' \
+AVAILCAL_OUTPUT_DIR=./out \
+python -m availcal.main
+# -> ./out/merged/availability.ics  (and ./out/raw/<Label>.ics overlays)
+```
+
+### 5. Deploy the cloud job
+```bash
+# Build & push the image to your ACR
+az acr login --name <ACR_NAME>
+docker build -t <ACR_LOGIN_SERVER>/availcal:v1 ./merge
+docker push <ACR_LOGIN_SERVER>/availcal:v1
+
+# Deploy infra (storage + key vault + scheduled job + RBAC)
+./infra/deploy.sh availcal-rg eastus containerImage=<ACR_LOGIN_SERVER>/availcal:v1
+```
+Then load your feed secrets into Key Vault and trigger a run — see
+[docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+### 6. Install the device agents (for Conditional-Access work accounts)
+- **Windows:** [agents/windows/README.md](agents/windows/README.md) — dry-run,
+  then `Install-Task.ps1` for the hourly Scheduled Task.
+- **macOS:** [agents/macos/README.md](agents/macos/README.md) — grant Calendar
+  access (TCC), dry-run, then `install.sh` for the hourly launchd agent.
+
+### 7. Subscribe your calendar client
+Point Apple Calendar / Thunderbird / Fantastical at the merged blob URL — see
+[docs/SUBSCRIBE.md](docs/SUBSCRIBE.md).
+
+## Privacy & correctness guarantees
+
+- **No event content leaves a source.** The internal model has no field that can
+  carry a title/location/attendee; only `{start, end, source, status, uid}`.
+- **The merged feed never carries the original UID** (it uses a stable hash of
+  `source+start+end`); per-source overlay feeds keep the original UID for dedup.
+- **All datetimes are timezone-aware UTC** from ingestion. A naive datetime is a
+  hard error, and `ruff`'s `DTZ` rules gate against naive comparisons in CI.
+- **Overlaps collapse only within a source**, never across — two calendars busy
+  at the same time stay two separately-tagged events, preserving attribution.
+
+## Known, accepted properties
+
+- **Google secret-iCal feeds lag by hours** regardless of poll rate (provider
+  cache). This is fine for planning; CalDAV and device reads provide freshness.
+  We document this rather than fight it — see ARCHITECTURE/RUNBOOK.
+- The default design uses **secret-ICS, not OAuth**, so there are no refresh
+  tokens to expire. (If you ever add personal-Gmail OAuth, the consent app must
+  be published to *Production* or tokens die after 7 days.)
+
+## License
+
+MIT.
