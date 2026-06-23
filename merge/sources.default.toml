@@ -1,0 +1,14 @@
+# Default in-image source registry. Override with AVAILCAL_SOURCES_TOML in
+# production (e.g. a Key Vault-mounted or config-mounted file). See the
+# repo-root sources.example.toml for the documented, fuller example.
+[ics]
+GoogPersonal = "Perso"
+OutlookPub   = "Work"
+
+[caldav]
+icloud_calendar   = "iCloud"
+fastmail_calendar = "Fastmail"
+
+[device]
+"Outlook - Work" = "WorkX"
+"Calendar"       = "Mac"
