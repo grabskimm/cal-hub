@@ -158,6 +158,12 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
         {
           name: 'merge'
           image: containerImage
+          // The image defaults to the HTTP server (for Cloudflare Containers);
+          // an ACA Job is one-shot, so override to the CLI which runs a single
+          // pull->merge->emit->upload cycle and exits.
+          command: [
+            'availcal'
+          ]
           resources: {
             cpu: json('0.5')
             memory: '1Gi'

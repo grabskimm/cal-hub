@@ -16,7 +16,47 @@ These are the working defaults chosen during the build (override via env/params)
 - The job authenticates to Storage/Key Vault via its **system-assigned managed
   identity**; agents prefer **Arc MI**, falling back to a **write-scoped SAS**.
 
-## One-time setup
+## One-time setup — Cloudflare (primary)
+
+Runs the merge Container on an hourly Worker cron, stores in R2, serves the feed.
+Requires a plan with **Containers** (Enterprise).
+
+```bash
+# 1. Create the R2 bucket and an Object Read&Write API token (dashboard or CLI)
+wrangler r2 bucket create availcal
+
+# 2. Worker deps + config validation
+cd worker
+npm ci
+npm run typecheck            # tsc --noEmit
+npx wrangler types           # validates wrangler.jsonc + bindings
+
+# 3. Secrets (run once each; strong random tokens, e.g. `openssl rand -hex 32`)
+wrangler secret put FEED_TOKEN                 # clients append ?token=<this>
+wrangler secret put AGENT_TOKEN                # device agents Bearer-auth
+wrangler secret put RUN_TOKEN                  # Worker<->Container + manual /run
+wrangler secret put AVAILCAL_R2_ACCOUNT_ID
+wrangler secret put AVAILCAL_R2_ACCESS_KEY_ID
+wrangler secret put AVAILCAL_R2_SECRET_ACCESS_KEY
+wrangler secret put AVAILCAL_ICS_FEEDS         # rawname=url,rawname=url
+
+# 4. Deploy (builds+pushes the Container, binds R2, registers the hourly cron)
+npx wrangler deploy
+
+# 5. Trigger a one-off run and tail logs
+curl -X POST https://availcal.<sub>.workers.dev/run -H "Authorization: Bearer <RUN_TOKEN>"
+npx wrangler tail
+```
+
+Agents point at the Worker upload endpoint:
+`AVAILCAL_AGENT_SAS_URL=https://availcal.<sub>.workers.dev/raw/<Label>.json` and
+`AVAILCAL_AGENT_TOKEN=<AGENT_TOKEN>`. Clients subscribe to
+`https://availcal.<sub>.workers.dev/availability.ics?token=<FEED_TOKEN>`.
+
+Local dev: `cp worker/.dev.vars.example worker/.dev.vars` (fill in), then
+`npx wrangler dev`.
+
+## One-time setup — Azure (alternative)
 
 ### 1. Deploy infrastructure
 ```bash

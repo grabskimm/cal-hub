@@ -31,6 +31,13 @@ availability.ics
 out/
 output/
 
+# Node / Cloudflare Worker
+node_modules/
+.wrangler/
+worker/.dev.vars
+!worker/.dev.vars.example
+worker/worker-configuration.d.ts
+
 # OS / editor
 .DS_Store
 Thumbs.db

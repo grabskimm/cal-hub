@@ -138,12 +138,16 @@ def collect_busy(store, labels: dict[str, str], horizon_days: int) -> list[dict]
     return out
 
 
-def upload(sas_url: str, payload: bytes) -> None:
+def upload(sas_url: str, payload: bytes, token: str | None = None) -> None:
     headers = {"Content-Type": "application/json"}
     # Azure Blob needs x-ms-blob-type; an R2/S3 presigned PUT must NOT receive an
     # unsigned header that could break its signature, so add it only for Azure.
     if "blob.core.windows.net" in sas_url:
         headers["x-ms-blob-type"] = "BlockBlob"
+    # When uploading via the Cloudflare Worker endpoint (PUT /raw/<src>.json),
+    # authenticate with a Bearer token instead of a signed URL.
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(sas_url, data=payload, method="PUT", headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https URL
         if resp.status not in (200, 201):
@@ -155,7 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print JSON, upload nothing")
     ap.add_argument("--sas-url", default=os.environ.get("AVAILCAL_AGENT_SAS_URL", ""),
-                    help="write-scoped blob SAS URL (or AVAILCAL_AGENT_SAS_URL)")
+                    help="write-scoped upload URL: Azure SAS, R2 presigned PUT, or "
+                         "Cloudflare Worker /raw/<src>.json (or AVAILCAL_AGENT_SAS_URL)")
+    ap.add_argument("--token", default=os.environ.get("AVAILCAL_AGENT_TOKEN", ""),
+                    help="Bearer token for the Cloudflare Worker upload endpoint "
+                         "(or AVAILCAL_AGENT_TOKEN)")
     ap.add_argument("--sources-toml", default="./sources.toml")
     ap.add_argument("--horizon-days", type=int, default=90)
     args = ap.parse_args(argv)
@@ -188,8 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n# DRY RUN: parsed {len(busy)} busy interval(s). Nothing uploaded.")
         return 0
 
-    upload(args.sas_url, payload)
-    print(f"Uploaded {len(busy)} busy interval(s) to blob.")
+    upload(args.sas_url, payload, token=args.token or None)
+    print(f"Uploaded {len(busy)} busy interval(s).")
     return 0
 
 

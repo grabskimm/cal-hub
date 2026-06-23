@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "availcal",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The merge job runs as a Cloudflare Container built from the merge/ image.
+  // Wrangler builds the Dockerfile (context = merge/) and pushes it to the
+  // Cloudflare registry on deploy. Requires a plan with Containers (Enterprise).
+  "containers": [
+    {
+      "class_name": "MergeContainer",
+      "image": "../merge/Dockerfile",
+      "instance_type": "standard",
+      "max_instances": 1
+    }
+  ],
+
+  // The Container is fronted by a Durable Object.
+  "durable_objects": {
+    "bindings": [{ "name": "MERGE_CONTAINER", "class_name": "MergeContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MergeContainer"] }],
+
+  // R2 bucket for /raw and /merged objects (create it first; see infra/cloudflare).
+  "r2_buckets": [{ "binding": "AVAILCAL_BUCKET", "bucket_name": "availcal" }],
+
+  // Hourly merge.
+  "triggers": { "crons": ["0 * * * *"] },
+
+  // Non-secret config. Secrets (tokens, feed URLs, R2 creds) are set with
+  // `wrangler secret put` — see worker/README.md.
+  "vars": {
+    "AVAILCAL_DEFAULT_TZ": "America/New_York",
+    "AVAILCAL_HORIZON_DAYS": "90",
+    "AVAILCAL_INCLUDE_TENTATIVE": "true",
+    "AVAILCAL_R2_BUCKET": "availcal"
+  },
+
+  "observability": { "enabled": true }
+}

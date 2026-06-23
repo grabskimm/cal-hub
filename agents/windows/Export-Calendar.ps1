@@ -48,6 +48,7 @@
 param(
     [switch]$DryRun,
     [string]$SasUrl = $env:AVAILCAL_AGENT_SAS_URL,
+    [string]$Token = $env:AVAILCAL_AGENT_TOKEN,
     [string]$SourcesToml = ".\sources.toml",
     [int]$HorizonDays = 90
 )
@@ -181,6 +182,8 @@ try {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $headers = @{ "Content-Type" = "application/json" }
     if ($SasUrl -match "blob\.core\.windows\.net") { $headers["x-ms-blob-type"] = "BlockBlob" }
+    # Cloudflare Worker upload endpoint authenticates with a Bearer token.
+    if (-not [string]::IsNullOrWhiteSpace($Token)) { $headers["Authorization"] = "Bearer $Token" }
     Invoke-RestMethod -Uri $SasUrl -Method Put -Headers $headers -Body $bytes | Out-Null
     Write-Output "Uploaded $($results.Count) busy interval(s)."
 } catch {

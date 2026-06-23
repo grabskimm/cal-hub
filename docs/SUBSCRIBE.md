@@ -1,15 +1,15 @@
 # Subscribing your calendar client
 
-AvailCal publishes one merged feed to blob storage at:
+AvailCal publishes one merged feed at object key `merged/availability.ics`.
+Subscribe clients to a **private, read-only URL** of it:
 
-```
-<container>/merged/availability.ics
-```
-
-Subscribe a client to a **secret/SAS URL** of that blob (read-only). Because the
-feed is private, generate a long-lived **read-only SAS** for the merged blob (or
-a stored access policy) and hand that URL to your clients. Never make the
-container public.
+- **Cloudflare (primary):**
+  `https://availcal.<your-subdomain>.workers.dev/availability.ics?token=<FEED_TOKEN>`
+  (the Worker streams it from R2 and checks the token). Use a custom domain if
+  you prefer. Per-source overlays are
+  `…/raw/<Label>.ics?token=<FEED_TOKEN>`.
+- **Azure:** a long-lived **read-only SAS** URL for the merged blob (or a stored
+  access policy). Never make the container public.
 
 > The merged feed is **self-describing**: each block's **title is its source's
 > one word** (e.g. `Work`, `Perso`, `iCloud`), and `CATEGORIES` carries the same

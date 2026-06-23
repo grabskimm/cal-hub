@@ -39,9 +39,14 @@ RUN pip install --no-cache-dir .
 COPY sources.default.toml /app/sources.toml
 ENV AVAILCAL_SOURCES_TOML=/app/sources.toml
 
-# Non-root for least privilege; the job authenticates via Managed Identity.
+# Non-root for least privilege; in cloud the job authenticates via Managed
+# Identity (Azure) or an R2 token (Cloudflare).
 RUN useradd --create-home --uid 10001 availcal
 USER availcal
 
-# The job entrypoint runs one full pull->merge->emit->upload cycle and exits.
-ENTRYPOINT ["availcal"]
+EXPOSE 8080
+
+# Default command runs the HTTP server, which is how Cloudflare Containers drive
+# the job (Worker cron -> POST /run). Override the command to `availcal` for a
+# one-shot batch run (e.g. Azure Container Apps Job, or local `docker run … availcal`).
+CMD ["availcal-server"]

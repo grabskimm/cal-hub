@@ -1,0 +1,16 @@
+# Local-dev secrets for `wrangler dev`. Copy to `.dev.vars` (gitignored) and fill.
+# In production these are set with `wrangler secret put` (see worker/README.md),
+# NOT from this file.
+
+# Auth tokens (use strong random values, e.g. `openssl rand -hex 32`)
+FEED_TOKEN="dev-feed-token"
+AGENT_TOKEN="dev-agent-token"
+RUN_TOKEN="dev-run-token"
+
+# R2 credentials handed to the merge Container (boto3 S3 against R2)
+AVAILCAL_R2_ACCOUNT_ID="your_cloudflare_account_id"
+AVAILCAL_R2_ACCESS_KEY_ID="r2_access_key_id"
+AVAILCAL_R2_SECRET_ACCESS_KEY="r2_secret_access_key"
+
+# Secret ICS feed URLs: rawname=url,rawname=url (matches sources.toml [ics] keys)
+AVAILCAL_ICS_FEEDS="GoogPersonal=https://calendar.google.com/.../basic.ics"

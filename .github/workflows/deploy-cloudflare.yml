@@ -1,0 +1,49 @@
+name: Deploy (Cloudflare)
+
+# Manual or tag-triggered deploy of the Worker + merge Container to Cloudflare.
+# Requires a plan with Containers (Enterprise).
+#
+# Repo configuration (Settings -> Secrets and variables -> Actions):
+#   Secrets:  CLOUDFLARE_API_TOKEN   (Workers Scripts:Edit, Workers R2 Storage:Edit,
+#                                     Containers/Cloudchamber as needed)
+#             CLOUDFLARE_ACCOUNT_ID
+# App secrets (FEED_TOKEN, AGENT_TOKEN, RUN_TOKEN, AVAILCAL_R2_*, AVAILCAL_ICS_FEEDS)
+# are set once out-of-band with `wrangler secret put` — they are NOT in this file.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      # Docker is preinstalled on ubuntu-latest; wrangler uses it to build the
+      # merge Container image from ../merge/Dockerfile and push it to Cloudflare.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Deploy Worker + Container
+        # Builds & pushes the container image, provisions the Durable Object +
+        # Container, binds R2, and registers the hourly cron trigger.
+        run: npx wrangler deploy

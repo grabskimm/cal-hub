@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 availcal = "availcal.main:main"
+availcal-server = "availcal.server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

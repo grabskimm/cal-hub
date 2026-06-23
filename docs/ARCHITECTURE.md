@@ -35,11 +35,44 @@ ICS to blob storage. Clients subscribe to the blob URL.
 
 ## Model B: scheduled, scale-to-zero
 
-The cloud component is an **Azure Container Apps Job** with a `Schedule` trigger
-(`cronExpression: "0 * * * *"`, hourly) — **not** an always-on container app or
-VM. It spins up, runs one pull→merge→emit→upload cycle, writes the blob, and
-exits. Cost at idle is effectively zero. This is a deliberate choice (Model B)
-over an always-on server (Model A).
+The cloud component is a **scheduled job**, hourly (`0 * * * *`), **not** an
+always-on server. It spins up, runs one pull→merge→emit→upload cycle, writes the
+feed, and goes back to zero. Cost at idle is effectively nil. This is a
+deliberate choice (Model B) over an always-on server (Model A).
+
+### Deployment targets (same image, two homes)
+
+The merge image is identical across targets; only orchestration + storage differ.
+
+**Cloudflare (primary): Workers + Containers + R2.** A single **Worker**:
+
+1. runs the **Cron Trigger** (hourly) which boots the merge **Container** (the
+   `merge/` image, running its `availcal-server` HTTP server) and calls
+   `POST /run`. The Container is fronted by a Durable Object and sleeps back to
+   zero after `sleepAfter`;
+2. **serves** the feed: `GET /availability.ics?token=…` streams from R2 via the
+   native binding;
+3. **accepts** device-agent uploads: `PUT /raw/<source>.json` (Bearer) → R2.
+
+The Container is request-oriented (Cloudflare proxies HTTP to a port), which is
+why the image runs a tiny HTTP server (`availcal/server.py`) by default rather
+than a one-shot CLI. It writes to R2 with a scoped R2 API token (boto3). Defined
+in `worker/wrangler.jsonc`; deployed with `wrangler deploy`.
+
+**Azure (alternative): Container Apps Job + Blob.** A `Microsoft.App/jobs` with a
+`Schedule` trigger runs the same image but overridden to the one-shot `availcal`
+CLI (`command: ["availcal"]`), reads secrets from Key Vault, and writes to Blob
+via Managed Identity. Defined in `infra/main.bicep`.
+
+```
+              Cloudflare                                  Azure
+  ┌─────────────────────────────┐          ┌──────────────────────────────┐
+  Cron→Worker→Container POST /run            ACA Job (Schedule) runs CLI
+  Worker serves /availability.ics            client reads secret/SAS blob URL
+  Worker PUT /raw/*.json → R2                agent PUT → SAS blob
+  storage: R2                                storage: Azure Blob
+  secrets: Workers Secrets                   secrets: Key Vault + Managed Identity
+  ```
 
 ## Components
 

@@ -24,10 +24,14 @@ Device-bound accounts ─(local agent → /raw JSON)─────┘     pull 
                           Apple Calendar / Thunderbird / Fantastical  (ICS subscription, hourly)
 ```
 
-A scheduled **Azure Container Apps Job** (hourly cron, no always-on server)
-pulls every source, normalizes all times to **UTC**, merges per-source busy
-blocks, and writes one merged `availability.ics` to object storage. Your calendar
-clients subscribe to that object. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+A **scheduled, scale-to-zero job** (hourly cron, no always-on server) pulls every
+source, normalizes all times to **UTC**, merges per-source busy blocks, and writes
+one merged `availability.ics` to object storage. Your calendar clients subscribe
+to that object. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+It runs on **Cloudflare Workers + Containers + R2** (primary — a Worker cron
+drives the merge Container and serves the feed from R2) or an **Azure Container
+Apps Job + Blob** (alternative). The same `merge/` image runs on both.
 
 **Storage is pluggable.** The same image writes to **Cloudflare R2** (S3-compatible,
 zero egress), **Azure Blob**, or a **local directory** — selected by env vars
@@ -87,16 +91,35 @@ python -m availcal.main
 ```
 
 ### 5. Deploy the cloud job
+
+Two supported targets — the **same `merge/` image** runs on both:
+
+**Cloudflare (Workers + Containers + R2)** — primary. A Worker runs the hourly
+cron, drives the merge Container, serves the feed from R2, and accepts agent
+uploads. See [worker/README.md](worker/README.md) and
+[infra/cloudflare/README.md](infra/cloudflare/README.md).
 ```bash
-# Build & push the image to your ACR
+wrangler r2 bucket create availcal          # one-time
+cd worker
+npm ci
+npm run typecheck                           # tsc --noEmit
+npx wrangler types                          # validate wrangler.jsonc + bindings
+# set secrets once (FEED_TOKEN, AGENT_TOKEN, RUN_TOKEN, AVAILCAL_R2_*, AVAILCAL_ICS_FEEDS):
+wrangler secret put FEED_TOKEN              # …repeat per secret (see worker/README.md)
+npx wrangler deploy                         # builds+pushes the Container, binds R2, registers cron
+# local dev: cp .dev.vars.example .dev.vars && npx wrangler dev
+```
+CI runs `wrangler types` + `tsc` on every PR; `npx wrangler deploy` runs from
+`.github/workflows/deploy-cloudflare.yml` (manual/tag).
+
+**Azure (Container Apps Job)** — alternative.
+```bash
 az acr login --name <ACR_NAME>
 docker build -t <ACR_LOGIN_SERVER>/availcal:v1 ./merge
 docker push <ACR_LOGIN_SERVER>/availcal:v1
-
-# Deploy infra (storage + key vault + scheduled job + RBAC)
 ./infra/deploy.sh availcal-rg eastus containerImage=<ACR_LOGIN_SERVER>/availcal:v1
 ```
-Then load your feed secrets into Key Vault and trigger a run — see
+Then load feed secrets into Key Vault / Workers Secrets and trigger a run — see
 [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ### 6. Install the device agents (for Conditional-Access work accounts)
@@ -106,8 +129,9 @@ Then load your feed secrets into Key Vault and trigger a run — see
   access (TCC), dry-run, then `install.sh` for the hourly launchd agent.
 
 ### 7. Subscribe your calendar client
-Point Apple Calendar / Thunderbird / Fantastical at the merged blob URL — see
-[docs/SUBSCRIBE.md](docs/SUBSCRIBE.md).
+Point Apple Calendar / Thunderbird / Fantastical at the feed URL — on Cloudflare
+that's `https://availcal.<sub>.workers.dev/availability.ics?token=<FEED_TOKEN>` —
+see [docs/SUBSCRIBE.md](docs/SUBSCRIBE.md).
 
 ## Privacy & correctness guarantees
 
