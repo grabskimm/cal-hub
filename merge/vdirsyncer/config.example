@@ -1,0 +1,56 @@
+# vdirsyncer config for AvailCal CalDAV sources (iCloud + Fastmail).
+#
+# Copy to `config`, fill in usernames and APP-SPECIFIC passwords (never your
+# main password), then point AVAILCAL_VDIRSYNCER_CONFIG at it. The job runs
+# `vdirsyncer -c <config> discover && sync`, which writes .ics files under
+# `status_path`/the storage paths below; AvailCal then reads those as a normal
+# ICS source. The collection directory name must match a key in the [caldav]
+# section of sources.toml so it resolves to the right one-word label.
+#
+# SECURITY: this file holds secrets once filled in. Keep it out of git (it is
+# gitignored) and store the real passwords in Key Vault for the cloud job.
+
+[general]
+status_path = "~/.vdirsyncer/status/"
+
+# -------------------- iCloud --------------------
+[pair icloud]
+a = "icloud_local"
+b = "icloud_remote"
+collections = ["from b"]
+# Only sync down; AvailCal is read-only and must never write back.
+conflict_resolution = "b wins"
+
+[storage icloud_local]
+type = "filesystem"
+# This path becomes <vdir>/icloud_calendar/*.ics -> registry [caldav].icloud_calendar
+path = "./vdir/icloud_calendar/"
+fileext = ".ics"
+
+[storage icloud_remote]
+type = "caldav"
+url = "https://caldav.icloud.com/"
+username = "YOUR_ICLOUD_EMAIL"
+# App-specific password from appleid.apple.com -> Sign-In and Security.
+password = "ICLOUD_APP_SPECIFIC_PASSWORD"
+read_only = true
+
+# -------------------- Fastmail --------------------
+[pair fastmail]
+a = "fastmail_local"
+b = "fastmail_remote"
+collections = ["from b"]
+conflict_resolution = "b wins"
+
+[storage fastmail_local]
+type = "filesystem"
+path = "./vdir/fastmail_calendar/"
+fileext = ".ics"
+
+[storage fastmail_remote]
+type = "caldav"
+url = "https://caldav.fastmail.com/dav/calendars/user/YOUR_FASTMAIL_EMAIL/"
+username = "YOUR_FASTMAIL_EMAIL"
+# App password from Fastmail -> Settings -> Privacy & Security -> App Passwords.
+password = "FASTMAIL_APP_PASSWORD"
+read_only = true
