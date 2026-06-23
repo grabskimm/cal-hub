@@ -1,0 +1,64 @@
+name: Deploy
+
+# Manual or tag-triggered. Uses OIDC federated credentials — NO long-lived cloud
+# secrets are stored in the repo. Configure these repo-level settings first:
+#   Secrets:   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#              (these are identifiers for the federated app, not credentials)
+#   Variables: AZURE_RESOURCE_GROUP, AZURE_LOCATION, ACR_NAME, ACR_LOGIN_SERVER
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to build/deploy'
+        required: false
+        default: 'latest'
+  push:
+    tags: ['v*']
+
+permissions:
+  id-token: write   # required for OIDC az login
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.event.inputs.image_tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC, no stored secret)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build & push image to ACR
+        run: |
+          set -euo pipefail
+          az acr login --name "${{ vars.ACR_NAME }}"
+          IMAGE="${{ vars.ACR_LOGIN_SERVER }}/availcal:${IMAGE_TAG}"
+          docker build -t "$IMAGE" ./merge
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Validate Bicep
+        run: az bicep build --file infra/main.bicep
+
+      - name: Deploy infrastructure
+        run: |
+          az deployment group create \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam \
+            --parameters containerImage="$IMAGE" \
+                         acrLoginServer="${{ vars.ACR_LOGIN_SERVER }}" \
+            --output table
+
+      - name: Point the job at the new image
+        run: |
+          az containerapp job update \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name availcal-merge \
+            --image "$IMAGE"
