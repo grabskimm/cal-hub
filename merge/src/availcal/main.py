@@ -38,12 +38,17 @@ from .pull import (
     run_vdirsyncer,
 )
 from .sources import SourceRegistry, load_sources
+from .storage import (
+    MERGED_OBJECT,
+    RAW_PREFIX,
+    AzureBlobBackend,
+    LocalStorageBackend,
+    R2StorageBackend,
+    StorageBackend,
+)
 from .timeutil import now_utc
 
 log = logging.getLogger("availcal")
-
-MERGED_BLOB = "merged/availability.ics"
-RAW_PREFIX = "raw/"
 
 
 def _parse_feeds(spec: str) -> dict[str, str]:
@@ -73,8 +78,15 @@ class Config:
     # Local inputs (fixtures / CI). Treated as ICS feeds keyed by filename stem.
     local_ics_dir: str | None = None
     raw_json_dir: str | None = None
-    # Output sink
+    # Output sink (first configured wins, in this order: local dir, R2, Azure).
     output_dir: str | None = None
+    # Cloudflare R2 (S3-compatible).
+    r2_bucket: str | None = None
+    r2_account_id: str | None = None
+    r2_access_key_id: str | None = None
+    r2_secret_access_key: str | None = None
+    r2_endpoint: str | None = None
+    # Azure Blob.
     storage_account: str | None = None
     blob_container: str = "availcal"
     connection_string: str | None = None
@@ -111,6 +123,11 @@ class Config:
             local_ics_dir=env.get("AVAILCAL_LOCAL_ICS_DIR"),
             raw_json_dir=env.get("AVAILCAL_RAW_JSON_DIR"),
             output_dir=env.get("AVAILCAL_OUTPUT_DIR"),
+            r2_bucket=env.get("AVAILCAL_R2_BUCKET"),
+            r2_account_id=env.get("AVAILCAL_R2_ACCOUNT_ID"),
+            r2_access_key_id=env.get("AVAILCAL_R2_ACCESS_KEY_ID"),
+            r2_secret_access_key=env.get("AVAILCAL_R2_SECRET_ACCESS_KEY"),
+            r2_endpoint=env.get("AVAILCAL_R2_ENDPOINT"),
             storage_account=env.get("AVAILCAL_STORAGE_ACCOUNT"),
             blob_container=env.get("AVAILCAL_BLOB_CONTAINER", "availcal"),
             connection_string=env.get("AZURE_STORAGE_CONNECTION_STRING"),
@@ -174,89 +191,59 @@ def gather_intervals(cfg: Config, registry: SourceRegistry) -> list[BusyInterval
     #    re-validate (model rejects naive/non-UTC) and keep the source as-is.
     if cfg.raw_json_dir:
         intervals += load_raw_json_dir(cfg.raw_json_dir)
-    intervals += _load_raw_json_blobs(cfg)
+    backend = make_backend(cfg)
+    if backend is not None:
+        for name, data in backend.iter_raw_json():
+            log.info("reading device upload %s", name)
+            intervals += load_raw_json(data.decode("utf-8"))
 
     return intervals
 
 
-# ----------------------- output sinks -----------------------
+# ----------------------- output sink selection -----------------------
 
 
-def _load_raw_json_blobs(cfg: Config) -> list[BusyInterval]:
-    """List and read /raw/*.json blobs (production device-agent uploads)."""
-    container = _blob_container_client(cfg)
-    if container is None:
-        return []
-    out: list[BusyInterval] = []
-    for blob in container.list_blobs(name_starts_with=RAW_PREFIX):
-        if blob.name.endswith(".json"):
-            data = container.download_blob(blob.name).readall()
-            out += load_raw_json(data.decode("utf-8"))
-    return out
+def make_backend(cfg: Config) -> StorageBackend | None:
+    """Pick the storage backend from config (first configured wins).
 
-
-def _blob_container_client(cfg: Config):
-    """Build a ContainerClient from connection string or Managed Identity, or None
-    when no Azure output is configured (pure-local run)."""
-    if cfg.connection_string:
-        from azure.storage.blob import ContainerClient
-
-        return ContainerClient.from_connection_string(
-            cfg.connection_string, cfg.blob_container
+    Order: local directory (dev/CI) -> Cloudflare R2 -> Azure Blob. Returns None
+    only when nothing is configured (a pure in-memory run with no output).
+    """
+    if cfg.output_dir:
+        return LocalStorageBackend(cfg.output_dir)
+    if cfg.r2_bucket:
+        return R2StorageBackend(
+            bucket=cfg.r2_bucket,
+            account_id=cfg.r2_account_id,
+            access_key_id=cfg.r2_access_key_id,
+            secret_access_key=cfg.r2_secret_access_key,
+            endpoint_url=cfg.r2_endpoint,
         )
-    if cfg.storage_account:
-        from azure.identity import DefaultAzureCredential
-        from azure.storage.blob import ContainerClient
-
-        account_url = f"https://{cfg.storage_account}.blob.core.windows.net"
-        return ContainerClient(
-            account_url=account_url,
-            container_name=cfg.blob_container,
-            credential=DefaultAzureCredential(),
+    if cfg.connection_string or cfg.storage_account:
+        return AzureBlobBackend(
+            container=cfg.blob_container,
+            connection_string=cfg.connection_string,
+            storage_account=cfg.storage_account,
         )
     return None
-
-
-def _upload(cfg: Config, blob_name: str, data: bytes) -> None:
-    container = _blob_container_client(cfg)
-    if container is None:
-        raise RuntimeError("no output sink configured")
-    container.upload_blob(
-        name=blob_name,
-        data=data,
-        overwrite=True,
-        content_type="text/calendar",
-    )
 
 
 def write_outputs(
     cfg: Config, merged_ics: bytes, per_source: dict[str, bytes]
 ) -> list[str]:
-    """Write merged + optional per-source feeds to the configured sink.
+    """Write merged + optional per-source feeds to the configured backend.
 
-    Returns the list of written paths/blob names (for logging/tests).
+    Returns the list of written locators (for logging/tests).
     """
-    written: list[str] = []
+    backend = make_backend(cfg)
+    if backend is None:
+        raise RuntimeError(
+            "no output sink configured (set AVAILCAL_OUTPUT_DIR, R2, or Azure env)"
+        )
 
-    if cfg.output_dir:
-        out = Path(cfg.output_dir)
-        (out / "merged").mkdir(parents=True, exist_ok=True)
-        (out / "raw").mkdir(parents=True, exist_ok=True)
-        merged_path = out / MERGED_BLOB
-        merged_path.write_bytes(merged_ics)
-        written.append(str(merged_path))
-        for label, data in per_source.items():
-            p = out / RAW_PREFIX / f"{label}.ics"
-            p.write_bytes(data)
-            written.append(str(p))
-        return written
-
-    _upload(cfg, MERGED_BLOB, merged_ics)
-    written.append(MERGED_BLOB)
+    written = [backend.upload(MERGED_OBJECT, merged_ics)]
     for label, data in per_source.items():
-        name = f"{RAW_PREFIX}{label}.ics"
-        _upload(cfg, name, data)
-        written.append(name)
+        written.append(backend.upload(f"{RAW_PREFIX}{label}.ics", data))
     return written
 
 

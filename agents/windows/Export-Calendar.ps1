@@ -174,12 +174,15 @@ if ($DryRun) {
     exit 0
 }
 
-# Upload as a block blob. The SAS must be write-scoped to this blob path only.
+# Upload the JSON. The URL must be write-scoped to this object path only.
+# Azure Blob needs x-ms-blob-type; an R2/S3 presigned PUT must NOT receive an
+# unsigned header that could break its signature, so add it only for Azure.
 try {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $headers = @{ "x-ms-blob-type" = "BlockBlob"; "Content-Type" = "application/json" }
+    $headers = @{ "Content-Type" = "application/json" }
+    if ($SasUrl -match "blob\.core\.windows\.net") { $headers["x-ms-blob-type"] = "BlockBlob" }
     Invoke-RestMethod -Uri $SasUrl -Method Put -Headers $headers -Body $bytes | Out-Null
-    Write-Output "Uploaded $($results.Count) busy interval(s) to blob."
+    Write-Output "Uploaded $($results.Count) busy interval(s)."
 } catch {
-    Fail "blob upload failed: $_"
+    Fail "upload failed: $_"
 }

@@ -84,9 +84,25 @@ over an always-on server (Model A).
 
 ### 5. Orchestrate (`main.py`)
 Env-driven config; loads+validates the source registry; optionally resolves feed
-secrets from Key Vault (`azure-identity`); pulls all channels; merges; emits;
-and writes to a local dir (CI/dev) or uploads to blob via Managed Identity or a
-connection string.
+secrets from a secret store; pulls all channels; merges; emits; and writes
+through a **pluggable storage backend**.
+
+### 6. Storage backends (`storage.py`)
+One small contract — `upload(name, data)` + `iter_raw_json()` — with three
+implementations selected by config (first wins): a **local directory**
+(dev/CI/container demo), **Cloudflare R2** via its S3-compatible API (`boto3`),
+and **Azure Blob** (connection string or Managed Identity). The object layout is
+identical on every backend:
+
+```
+raw/<source>.json        # device-agent uploads (input)
+merged/availability.ics  # the merged free/busy feed (output)
+raw/<label>.ics          # optional per-source overlays (output)
+```
+
+R2 is the default target for the Cloudflare deployment (S3-compatible, **zero
+egress fees** — ideal for an hourly-polled feed). The merge image is identical
+across backends; only env vars differ.
 
 ## Data model & contracts
 

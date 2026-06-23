@@ -8,8 +8,12 @@ dependencies = [
     "icalendar==7.2.0",
     "recurring-ical-events==3.8.2",
     "httpx==0.28.1",
+    # Cloudflare R2 (S3-compatible) storage backend.
+    "boto3==1.43.36",
+    # Azure Blob storage backend (alternative to R2).
     "azure-storage-blob==12.24.0",
     "azure-identity==1.19.0",
+    "azure-keyvault-secrets==4.9.0",
 ]
 
 [project.optional-dependencies]

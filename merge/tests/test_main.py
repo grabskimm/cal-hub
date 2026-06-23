@@ -7,7 +7,10 @@ from pathlib import Path
 
 import icalendar
 
+import availcal.main as main_mod
 from availcal.main import Config, run
+from availcal.storage import MERGED_OBJECT, R2StorageBackend
+from test_storage import FakeS3
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -91,3 +94,36 @@ def test_run_collapses_same_source_only(tmp_path):
     vevents = [c for c in cal.walk() if c.name == "VEVENT"]
     # Three overlapping same-source blocks collapse into exactly one.
     assert len(vevents) == 1
+
+
+def test_run_routes_through_r2_backend(tmp_path, monkeypatch):
+    """Device JSON is read from R2 raw/*.json and the merged feed is written
+    back to R2 — proving the orchestrator is storage-backend agnostic."""
+    sources = _write_sources(tmp_path)
+
+    fake = FakeS3()
+    fake.put_object(
+        Bucket="availcal",
+        Key="raw/WorkX.json",
+        Body=(FIX / "raw_workx.json").read_bytes(),
+    )
+    backend = R2StorageBackend(bucket="availcal", client=fake)
+    # Route make_backend to our fake-R2 backend regardless of cfg internals.
+    monkeypatch.setattr(main_mod, "make_backend", lambda cfg: backend)
+
+    cfg = Config(
+        sources_toml=str(sources),
+        r2_bucket="availcal",
+        emit_per_source=True,
+        window_start=datetime(2026, 1, 1, tzinfo=UTC),
+        horizon_days=365,
+    )
+    written = run(cfg)
+
+    # Merged feed written to R2 and round-trips.
+    assert f"r2://availcal/{MERGED_OBJECT}" in written
+    merged = fake.store[("availcal", MERGED_OBJECT)]["Body"]
+    cal = icalendar.Calendar.from_ical(merged)
+    vevents = [c for c in cal.walk() if c.name == "VEVENT"]
+    assert vevents, "device JSON from R2 should produce busy blocks"
+    assert {str(e.get("SUMMARY")) for e in vevents} == {"WorkX"}

@@ -26,8 +26,13 @@ Device-bound accounts ─(local agent → /raw JSON)─────┘     pull 
 
 A scheduled **Azure Container Apps Job** (hourly cron, no always-on server)
 pulls every source, normalizes all times to **UTC**, merges per-source busy
-blocks, and writes one merged `availability.ics` to blob storage. Your calendar
-clients subscribe to that blob. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+blocks, and writes one merged `availability.ics` to object storage. Your calendar
+clients subscribe to that object. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+**Storage is pluggable.** The same image writes to **Cloudflare R2** (S3-compatible,
+zero egress), **Azure Blob**, or a **local directory** — selected by env vars
+(`AVAILCAL_OUTPUT_DIR` > R2 > Azure). For R2, see
+[infra/cloudflare/README.md](infra/cloudflare/README.md).
 
 The only bespoke code is the **device-bound local reads** (agents) and the
 **free/busy merge**. Everything else reuses existing tools: `recurring-ical-events`

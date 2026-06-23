@@ -139,15 +139,15 @@ def collect_busy(store, labels: dict[str, str], horizon_days: int) -> list[dict]
 
 
 def upload(sas_url: str, payload: bytes) -> None:
-    req = urllib.request.Request(
-        sas_url,
-        data=payload,
-        method="PUT",
-        headers={"x-ms-blob-type": "BlockBlob", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https SAS
+    headers = {"Content-Type": "application/json"}
+    # Azure Blob needs x-ms-blob-type; an R2/S3 presigned PUT must NOT receive an
+    # unsigned header that could break its signature, so add it only for Azure.
+    if "blob.core.windows.net" in sas_url:
+        headers["x-ms-blob-type"] = "BlockBlob"
+    req = urllib.request.Request(sas_url, data=payload, method="PUT", headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https URL
         if resp.status not in (200, 201):
-            die(f"blob upload returned HTTP {resp.status}")
+            die(f"upload returned HTTP {resp.status}")
 
 
 def main(argv: list[str] | None = None) -> int:
