@@ -3,11 +3,12 @@
 AvailCal publishes one merged feed at object key `merged/availability.ics`.
 Subscribe clients to a **private, read-only URL** of it:
 
-- **Cloudflare (primary):**
-  `https://availcal.<your-subdomain>.workers.dev/availability.ics?token=<FEED_TOKEN>`
-  (the Worker streams it from R2 and checks the token). Use a custom domain if
-  you prefer. Per-source overlays are
-  `…/raw/<Label>.ics?token=<FEED_TOKEN>`.
+- **Cloudflare (primary):** a custom domain
+  `https://availcal.example.com/availability.ics?token=<FEED_TOKEN>` (or the
+  `*.workers.dev` equivalent) — the Worker streams it from R2 and checks the
+  token. Per-source overlays are `…/raw/<Label>.ics?token=<FEED_TOKEN>`. See
+  [worker/README.md](../worker/README.md#custom-domain-enterprise) to enable the
+  custom domain.
 - **Azure:** a long-lived **read-only SAS** URL for the merged blob (or a stored
   access policy). Never make the container public.
 

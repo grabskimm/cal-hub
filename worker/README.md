@@ -73,13 +73,32 @@ Docker Hub / pip egress limits as any image build; in normal CI it just works.)
 | POST | `/run` | `RUN_TOKEN` (Bearer) | manual merge trigger |
 | GET | `/health` | none | liveness |
 
+## Custom domain (Enterprise)
+
+To serve the feed from your own hostname instead of `*.workers.dev`:
+
+1. Make sure the domain (e.g. `example.com`) is a **zone in this Cloudflare
+   account**.
+2. In `wrangler.jsonc`, uncomment the `routes` line and set your hostname:
+   ```jsonc
+   "routes": [{ "pattern": "availcal.example.com", "custom_domain": true }],
+   ```
+3. `npx wrangler deploy` — Cloudflare provisions the DNS record and TLS cert and
+   maps the **whole hostname (all paths)** to this Worker.
+
+The feed is then
+`https://availcal.example.com/availability.ics?token=<FEED_TOKEN>`, uploads go to
+`https://availcal.example.com/raw/<Label>.json`, etc. The `*.workers.dev` URL
+keeps working alongside it. Leave the line commented until the zone exists, or
+deploy fails on an unknown zone.
+
 ## Point clients & agents at the Worker
 
 - **Calendar clients** (see [`docs/SUBSCRIBE.md`](../docs/SUBSCRIBE.md)) subscribe
-  to `https://availcal.<your-subdomain>.workers.dev/availability.ics?token=<FEED_TOKEN>`
-  (or your custom domain).
+  to `https://availcal.example.com/availability.ics?token=<FEED_TOKEN>` (custom
+  domain) or the `*.workers.dev` equivalent.
 - **Device agents** set
-  `AVAILCAL_AGENT_SAS_URL=https://availcal.<sub>.workers.dev/raw/<Label>.json`
+  `AVAILCAL_AGENT_SAS_URL=https://availcal.example.com/raw/<Label>.json`
   and `AVAILCAL_AGENT_TOKEN=<AGENT_TOKEN>`. The agents send the Bearer token
   automatically; no presigned URLs needed.
 

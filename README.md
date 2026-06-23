@@ -130,8 +130,8 @@ Then load feed secrets into Key Vault / Workers Secrets and trigger a run — se
 
 ### 7. Subscribe your calendar client
 Point Apple Calendar / Thunderbird / Fantastical at the feed URL — on Cloudflare
-that's `https://availcal.<sub>.workers.dev/availability.ics?token=<FEED_TOKEN>` —
-see [docs/SUBSCRIBE.md](docs/SUBSCRIBE.md).
+that's `https://availcal.example.com/availability.ics?token=<FEED_TOKEN>` (your
+custom domain, or the `*.workers.dev` host) — see [docs/SUBSCRIBE.md](docs/SUBSCRIBE.md).
 
 ## Privacy & correctness guarantees
 

@@ -29,6 +29,14 @@
   // Hourly merge.
   "triggers": { "crons": ["0 * * * *"] },
 
+  // Custom domain for the feed (Enterprise). Uncomment and set a hostname on a
+  // zone in this Cloudflare account; `wrangler deploy` provisions DNS + TLS and
+  // maps the whole hostname (and all paths) to this Worker, so the feed becomes
+  //   https://availcal.example.com/availability.ics?token=<FEED_TOKEN>
+  // Leave commented until the zone exists, otherwise deploy fails on an unknown
+  // zone. The *.workers.dev URL keeps working alongside a custom domain.
+  // "routes": [{ "pattern": "availcal.example.com", "custom_domain": true }],
+
   // Non-secret config. Secrets (tokens, feed URLs, R2 creds) are set with
   // `wrangler secret put` — see worker/README.md.
   "vars": {

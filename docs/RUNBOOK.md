@@ -40,18 +40,23 @@ wrangler secret put AVAILCAL_R2_ACCESS_KEY_ID
 wrangler secret put AVAILCAL_R2_SECRET_ACCESS_KEY
 wrangler secret put AVAILCAL_ICS_FEEDS         # rawname=url,rawname=url
 
-# 4. Deploy (builds+pushes the Container, binds R2, registers the hourly cron)
+# 4. (Optional) custom domain: uncomment the `routes` line in wrangler.jsonc
+#    (set availcal.example.com to a zone in this account) before deploying.
+
+# 5. Deploy (builds+pushes the Container, binds R2, registers the hourly cron,
+#    and provisions the custom domain DNS+TLS if a route is set)
 npx wrangler deploy
 
-# 5. Trigger a one-off run and tail logs
-curl -X POST https://availcal.<sub>.workers.dev/run -H "Authorization: Bearer <RUN_TOKEN>"
+# 6. Trigger a one-off run and tail logs
+curl -X POST https://availcal.example.com/run -H "Authorization: Bearer <RUN_TOKEN>"
 npx wrangler tail
 ```
 
 Agents point at the Worker upload endpoint:
-`AVAILCAL_AGENT_SAS_URL=https://availcal.<sub>.workers.dev/raw/<Label>.json` and
+`AVAILCAL_AGENT_SAS_URL=https://availcal.example.com/raw/<Label>.json` and
 `AVAILCAL_AGENT_TOKEN=<AGENT_TOKEN>`. Clients subscribe to
-`https://availcal.<sub>.workers.dev/availability.ics?token=<FEED_TOKEN>`.
+`https://availcal.example.com/availability.ics?token=<FEED_TOKEN>`. (Substitute
+your `*.workers.dev` host if you skip the custom domain.)
 
 Local dev: `cp worker/.dev.vars.example worker/.dev.vars` (fill in), then
 `npx wrangler dev`.
