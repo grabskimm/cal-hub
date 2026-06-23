@@ -158,8 +158,15 @@ class AzureBlobBackend:
             )
 
     def upload(self, name: str, data: bytes, content_type: str = "text/calendar") -> str:
+        # azure-storage-blob's upload_blob takes content type via ContentSettings,
+        # NOT a `content_type` kwarg (which would raise TypeError).
+        from azure.storage.blob import ContentSettings
+
         self._container.upload_blob(
-            name=name, data=data, overwrite=True, content_type=content_type
+            name=name,
+            data=data,
+            overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
         )
         return name
 

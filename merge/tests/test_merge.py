@@ -104,3 +104,14 @@ def test_flatten_across_sources_unions_everything():
     assert flat[0].start == _utc(2026, 6, 24, 9)
     assert flat[0].end == _utc(2026, 6, 24, 12)
     assert {i.source for i in flat} == {"Busy"}
+
+
+def test_fuzzy_dedup_indexed_per_source_keeps_distinct_sources():
+    # Same times in two sources must NOT fuzzy-dedup across sources.
+    a = BusyInterval(_utc(2026, 6, 24, 9), _utc(2026, 6, 24, 10), "Work", uid="a")
+    b = BusyInterval(_utc(2026, 6, 24, 9), _utc(2026, 6, 24, 10), "Perso", uid="b")
+    c = BusyInterval(_utc(2026, 6, 24, 9), _utc(2026, 6, 24, 10), "Work", uid="c")
+    merged = merge_intervals([a, b, c])
+    # Work's a & c fuzzy-collapse to one; Perso stays -> two events total.
+    assert len(merged) == 2
+    assert {m.source for m in merged} == {"Work", "Perso"}

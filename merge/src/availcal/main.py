@@ -53,12 +53,22 @@ log = logging.getLogger("availcal")
 
 
 def _parse_feeds(spec: str) -> dict[str, str]:
-    """Parse ``rawname=url,rawname=url`` into a dict. URLs may contain '='."""
+    """Parse ``rawname=url,rawname=url`` into a dict. URLs may contain '='.
+
+    Fails fast on a malformed entry (missing ``=``, empty rawname or URL) rather
+    than silently dropping it — a typo here otherwise surfaces as a confusing
+    "missing calendar" with no error.
+    """
     feeds: dict[str, str] = {}
     for part in filter(None, (p.strip() for p in spec.split(","))):
-        rawname, _, url = part.partition("=")
-        if rawname and url:
-            feeds[rawname.strip()] = url.strip()
+        rawname, sep, url = part.partition("=")
+        rawname, url = rawname.strip(), url.strip()
+        if not sep or not rawname or not url:
+            raise ValueError(
+                f"malformed AVAILCAL_ICS_FEEDS entry {part!r}; "
+                f"expected 'rawname=url' (comma-separated)"
+            )
+        feeds[rawname] = url
     return feeds
 
 

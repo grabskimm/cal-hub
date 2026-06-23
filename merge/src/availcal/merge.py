@@ -41,28 +41,35 @@ def _dedup(intervals: list[BusyInterval]) -> list[BusyInterval]:
         else:
             no_uid.append(iv)
 
-    kept: list[BusyInterval] = list(by_uid.values())
+    kept: list[BusyInterval] = []
+    # Fuzzy dedup is only meaningful within a source, so index kept intervals by
+    # source and scan only that source's list (not every kept interval).
+    kept_by_source: dict[str, list[BusyInterval]] = defaultdict(list)
+    seen: set[BusyInterval] = set()
 
-    # Fuzzy pass: an interval matching an already-kept one (same source, start
-    # and end within +-1 min) is a duplicate even with a different/absent UID.
+    def add(iv: BusyInterval) -> None:
+        kept.append(iv)
+        kept_by_source[iv.source].append(iv)
+        seen.add(iv)
+
+    # Fuzzy pass: an interval matching an already-kept one in the SAME source
+    # (start and end within +-1 min) is a duplicate even with a different/absent
+    # UID.
     def is_fuzzy_dup(iv: BusyInterval) -> bool:
-        for k in kept:
-            if (
-                k.source == iv.source
-                and abs(k.start - iv.start) <= FUZZY_WINDOW
-                and abs(k.end - iv.end) <= FUZZY_WINDOW
-            ):
-                return True
-        return False
+        return any(
+            abs(k.start - iv.start) <= FUZZY_WINDOW
+            and abs(k.end - iv.end) <= FUZZY_WINDOW
+            for k in kept_by_source[iv.source]
+        )
+
+    for iv in by_uid.values():
+        add(iv)
 
     for iv in no_uid + [iv for iv in intervals if iv.uid]:
-        # Re-scan all intervals (incl. uid ones) so a no-uid copy of a uid event
-        # is also caught. Skip ones already kept by identity.
-        if iv in kept:
+        # Skip exact duplicates (O(1) via the set) and same-source fuzzy dups.
+        if iv in seen or is_fuzzy_dup(iv):
             continue
-        if is_fuzzy_dup(iv):
-            continue
-        kept.append(iv)
+        add(iv)
     return kept
 
 

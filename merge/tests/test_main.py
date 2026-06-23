@@ -180,3 +180,20 @@ def test_public_feed_off_by_default(tmp_path):
     )
     run(cfg)
     assert not (out_dir / PUBLIC_OBJECT).exists()  # opt-in only
+
+
+def test_parse_feeds_fails_fast_on_malformed():
+    import pytest
+
+    from availcal.main import _parse_feeds
+
+    assert _parse_feeds("") == {}
+    assert _parse_feeds("A=https://x/a.ics,B=https://y/b.ics") == {
+        "A": "https://x/a.ics",
+        "B": "https://y/b.ics",
+    }
+    # URL containing '=' is preserved (partition on first '=').
+    assert _parse_feeds("A=https://x/a.ics?k=v") == {"A": "https://x/a.ics?k=v"}
+    for bad in ("noequals", "=https://x", "A="):
+        with pytest.raises(ValueError, match="malformed"):
+            _parse_feeds(bad)

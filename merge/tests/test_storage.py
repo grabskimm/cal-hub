@@ -90,3 +90,26 @@ def test_r2_requires_endpoint_or_account_id():
 
     with pytest.raises(ValueError, match="ACCOUNT_ID or AVAILCAL_R2_ENDPOINT"):
         R2StorageBackend(bucket="availcal")  # no client, no account/endpoint
+
+
+class FakeAzureContainer:
+    """Records upload_blob kwargs to verify ContentSettings usage."""
+
+    def __init__(self):
+        self.calls = []
+
+    def upload_blob(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def test_azure_backend_uses_content_settings_not_content_type():
+    from availcal.storage import AzureBlobBackend
+
+    fake = FakeAzureContainer()
+    be = AzureBlobBackend(container="availcal", client=fake)
+    be.upload(MERGED_OBJECT, b"ICS", content_type="text/calendar")
+    [call] = fake.calls
+    # The real SDK has no content_type kwarg; we must pass content_settings.
+    assert "content_type" not in call
+    assert call["content_settings"].content_type == "text/calendar"
+    assert call["overwrite"] is True
