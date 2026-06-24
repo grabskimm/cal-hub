@@ -94,6 +94,11 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
   .colbody.selectable { cursor:crosshair; }
   .selrange { position:absolute; left:2px; right:2px; background:rgba(99,102,241,.22);
     border:1.5px solid var(--brand); border-radius:6px; z-index:7; pointer-events:none; }
+  /* first-tap start marker (touch) */
+  .seltap { position:absolute; left:2px; right:2px; height:0; border-top:2px dashed var(--brand);
+    z-index:7; pointer-events:none; }
+  .seltap::before { content:'start'; position:absolute; left:4px; top:-1.05rem; font-size:.6rem; font-weight:800;
+    color:#fff; background:var(--brand); padding:0 .35rem; border-radius:5px; }
   .selpop { position:fixed; inset:0; background:rgba(11,16,32,.45); display:flex; align-items:center;
     justify-content:center; padding:1rem; z-index:60; animation:fade .15s ease; }
   .selpop[hidden] { display:none !important; }
@@ -362,7 +367,7 @@ function render() {
     monthEl.hidden = true; timeWrap.hidden = false;
     hintEl.textContent = view === 'week'
       ? 'Tip: swipe horizontally to see the full week on small screens.'
-      : 'Tip: drag across the hours to block that time in your Outlook calendar.';
+      : 'Tip: drag across the hours (on a phone: tap the start, then the end) to block that time in Outlook.';
     renderTimeGrid(tz);
   }
   periodEl.textContent = periodLabel(tz);
@@ -482,6 +487,8 @@ function enableDaySelect(body, dayKey, tz) {
     const y = Math.max(0, Math.min(DAY_PX, clientY - r.top));
     return Math.max(0, Math.min(1440, Math.round((y/DAY_PX)*1440/SNAP_MIN)*SNAP_MIN));
   };
+
+  // Desktop: click-drag across the hours.
   body.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -499,6 +506,29 @@ function enableDaySelect(body, dayKey, tz) {
     };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   });
+
+  // Touch: a drag here scrolls the day, so use tap-the-start then tap-the-end.
+  // (A real tap barely moves; a scroll swipe moves a lot — we distinguish them.)
+  let tapStart = null, marker = null, t0 = null;
+  const clearTap = () => { tapStart = null; if (marker) { marker.remove(); marker = null; } statusEl.textContent = ''; };
+  body.addEventListener('touchstart', (e) => {
+    const t = e.touches[0]; t0 = { x: t.clientX, y: t.clientY, time: Date.now() };
+  }, { passive: true });
+  body.addEventListener('touchend', (e) => {
+    if (!t0) return; const t = e.changedTouches[0];
+    const moved = Math.abs(t.clientX - t0.x) + Math.abs(t.clientY - t0.y);
+    const dt = Date.now() - t0.time; t0 = null;
+    if (moved > 12 || dt > 700) return; // a scroll/long-hold, not a tap
+    const m = yToMin(t.clientY);
+    if (tapStart === null) {
+      tapStart = m;
+      marker = el('div','seltap',''); marker.style.top = (m/1440*DAY_PX) + 'px'; body.appendChild(marker);
+      statusEl.textContent = 'Tap the end time to block it →';
+    } else {
+      const a = Math.min(tapStart, m), b = Math.max(tapStart, m); clearTap();
+      if (b - a >= SNAP_MIN) openSelPop(dayKey, a, b, tz);
+    }
+  }, { passive: true });
 }
 
 async function load() {

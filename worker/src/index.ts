@@ -413,7 +413,7 @@ function esc(s: string): string {
 // Bump this whenever the UI changes. It is shown (tiny) in the footer so you can
 // confirm at a glance WHICH build a page is actually serving — ending any
 // "is this the old cached version?" ambiguity.
-const BUILD_TAG = 'b19 · 2026-06-24 day-range-outlook';
+const BUILD_TAG = 'b20 · 2026-06-24 day-range-touch';
 
 /** Build the © footer HTML from env (empty when no owner configured). */
 function buildFooter(env: Env): string {

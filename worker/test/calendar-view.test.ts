@@ -85,6 +85,10 @@ describe('calendarHtml', () => {
     expect(html).toContain('id="selpop"'); // title prompt popup
     expect(html).toContain('Open in Outlook');
     expect(html).toContain("'office'"); // Office 365 flavor
+    // Mobile: tap-start / tap-end (a touch drag would just scroll).
+    expect(html).toContain('touchstart');
+    expect(html).toContain('touchend');
+    expect(html).toContain('seltap');
   });
 
   it('uses a compact timezone dropdown', () => {
