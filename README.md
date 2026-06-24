@@ -150,9 +150,10 @@ custom domain, or the `*.workers.dev` host) — see [docs/SUBSCRIBE.md](docs/SUB
 - **Web scheduling endpoints**: on the public host, `GET /freebusy.json` and a
   computed `GET /slots.json` (CORS-enabled) let a webpage render bookable free
   slots; a demo page is served at `/`. Read-only — booking is wired by your page.
-- **Outlook booking page**: `GET /book` turns those free slots into an Outlook
-  event via a compose deeplink (you're the invitee; visitor presses Save). No
-  write credential — AvailCal stays read-only.
+- **Booking page (any platform)**: `GET /book` turns a free slot into a calendar
+  event — universal `.ics` download + Add-to-Google/Outlook links (you're the
+  invitee). Works whatever calendar the booker uses; no write credential —
+  AvailCal stays read-only.
 
 ## Known, accepted properties
 

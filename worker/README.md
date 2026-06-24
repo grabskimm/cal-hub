@@ -10,7 +10,8 @@ scale-to-zero:
 2. **Serves the private feed**: `GET /availability.ics?token=…` streams from R2.
 3. **Accepts device-agent uploads**: `PUT /raw/<source>.json` (Bearer auth) → R2.
 4. **Public scheduling host** (optional, separate domain, token-free): anonymized
-   `/availability.ics`, `/freebusy.json`, computed `/slots.json`, and a demo page.
+   `/availability.ics`, `/freebusy.json`, computed `/slots.json`, a slots demo,
+   and a provider-agnostic booking page (`/book`).
 
 ```
 Cron (hourly) ─► Worker.scheduled() ─► Container POST /run ─► pull/merge/emit ─► R2
@@ -127,10 +128,10 @@ Apple Calendar / Thunderbird / Fantastical →
 ### 10. (Optional) public feed + web scheduling + Outlook booking
 With step 3's public host set and `AVAILCAL_EMIT_PUBLIC=true`, the public host
 serves the anonymized ICS, `/freebusy.json`, `/slots.json`, a slots demo at `/`,
-and an **Outlook booking page at `/book`** — all token-free. See
+and a **booking page at `/book`** — all token-free. See
 [Public anonymized feed](#public-anonymized-feed-optional),
 [Web scheduling endpoints](#web-scheduling-endpoints-on-the-public-host), and
-[Booking with Outlook](#booking-with-outlook-read-only-hand-off).
+[Booking](#booking-provider-agnostic-read-only).
 
 ### 11. (Optional) device agents — Conditional-Access work accounts
 On each machine where that account is signed in, set:
@@ -189,7 +190,7 @@ with permissive CORS (`Access-Control-Allow-Origin: *`):
 | `GET /` | A self-contained demo page that renders bookable slots. |
 | `GET /freebusy.json` | Anonymized busy blocks: `[{"start","end"}]` (UTC). |
 | `GET /slots.json?…` | Computed **free** slots (see params below). |
-| `GET /book` | An **Outlook booking page** (free slots → Outlook compose deeplink). |
+| `GET /book` | A **booking page**: free slots → universal .ics / Google / Outlook. |
 | `GET /availability.ics` | The anonymized ICS (calendar subscription). |
 
 `/slots.json` query params (all optional; env sets the defaults):
@@ -219,37 +220,48 @@ const { slots } = await r.json();   // [{ start: '2026-06-24T13:00:00.000Z', end
 > count — but the time windows themselves are visible. Leave it off unless you
 > want that.
 
-### Booking with Outlook (read-only hand-off)
+### Booking (provider-agnostic, read-only)
 
 `GET /book` on the public host is a ready-made booking page that **uses the
 availability AvailCal generates** (it fetches the same `/slots.json`, so only
-genuinely-free times are offered) and, on click, opens an **Outlook compose
-deeplink** prefilled with the slot and you as invitee. The visitor just presses
-**Save** in Outlook and the invite is sent — there is **no write credential, no
-OAuth, no backend**, so AvailCal stays read-only. Once the booked event lands on
-a calendar AvailCal already reads, that slot drops out of availability on the
-next hourly merge (subject to the usual feed-cache lag).
+genuinely-free times are offered). The booker's platform is unknown, so picking a
+slot offers **three universal add-to-calendar actions**:
+
+- **Download `.ics`** — works in Apple Calendar, Outlook desktop, or any client.
+- **Add to Google** — a Google Calendar template link (you're added as a guest).
+- **Add to Outlook** — an Outlook web compose deeplink (you're the invitee).
+
+The Google/Outlook links add **you (the owner)** as guest/invitee, so saving on
+those paths notifies you; the `.ics` is the universal fallback. There is **no
+write credential, no OAuth, no backend** — AvailCal stays read-only. Once the
+booked event lands on a calendar AvailCal already reads, that slot drops out of
+availability on the next hourly merge (subject to the usual feed-cache lag).
 
 Configure it with `vars` in `wrangler.jsonc`:
 
 | Var | Meaning |
 | --- | --- |
-| `BOOKING_OWNER_EMAIL` | mailbox added as the invitee on the composed event |
+| `BOOKING_OWNER_EMAIL` | mailbox added as guest/invitee on the event |
 | `BOOKING_TITLE` | default event subject |
-| `BOOKING_OUTLOOK_FLAVOR` | `office` (Microsoft 365) or `live` (personal outlook.com) |
+| `BOOKING_OUTLOOK_FLAVOR` | which Outlook quick-link to use: `office` (M365) or `live` (personal) |
 
-> Why not native **Microsoft Bookings**? Microsoft Bookings derives availability
-> from the staff mailbox calendar — it does **not** read an external feed — so it
-> can't reflect AvailCal's *aggregated* availability. This page is the bridge:
-> AvailCal computes the free slots, Outlook creates the event. If you'd rather
-> fully automate booking (no Save click), point your own backend at `/slots.json`
-> and create events via Microsoft Graph — that backend (not AvailCal) holds the
-> write credential.
+> **Why not a hosted tool (Calendly, Microsoft Bookings, Acuity)?** They derive
+> availability from the calendar account they're *connected to* — they do **not**
+> read an external feed — so they can't natively reflect AvailCal's *aggregated*
+> availability. To use one anyway, subscribe AvailCal's **private** ICS feed into
+> the calendar that tool checks for conflicts; caveat: subscribed-ICS refresh lags
+> hours and not every tool honors subscribed calendars. The `/book` page avoids
+> that by consuming `/slots.json` directly. If you want a hosted tool's polish
+> (reminders, reschedule, payments) AND fully-automated booking, point your own
+> backend at `/slots.json` and create events via the provider's API (Google /
+> Microsoft Graph) — that backend, not AvailCal, holds the write credential.
 
 **Self-hosting** your own booking page instead of `/book`: copy the same flow —
 `fetch('https://availability.example.com/slots.json?…')` (CORS is open), render
-slots, and build the Outlook deeplink. The page wires the chosen slot however you
-like (the standalone demo at `/` dispatches an `availcal:slot-selected` event).
+slots, then build the calendar links (the builders live in
+[`src/calendar-links.ts`](src/calendar-links.ts)). The standalone demo at `/`
+also dispatches an `availcal:slot-selected` event you can wire up however you
+like.
 
 ## Custom domain (Enterprise)
 

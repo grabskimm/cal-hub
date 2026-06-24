@@ -64,8 +64,9 @@
     "SCHEDULE_DAYS": "1-5",
     "SCHEDULE_MAX_RANGE_DAYS": "62",
 
-    // Outlook booking page at /book on the public host. Set BOOKING_OWNER_EMAIL
-    // to the mailbox that should receive the invite. FLAVOR: "office" (M365) or
+    // Booking page at /book on the public host (universal .ics + Google + Outlook
+    // links). BOOKING_OWNER_EMAIL = the mailbox added as guest/invitee.
+    // BOOKING_OUTLOOK_FLAVOR picks the Outlook quick-link: "office" (M365) or
     // "live" (personal outlook.com).
     "BOOKING_OWNER_EMAIL": "you@example.com",
     "BOOKING_TITLE": "Meeting",

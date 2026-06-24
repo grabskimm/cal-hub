@@ -22,9 +22,16 @@ describe('bookingHtml', () => {
     expect(html).toContain("/slots.json?");
   });
 
-  it('embeds the deeplink builder bound to a stable name', () => {
+  it('embeds all three provider builders bound to stable names', () => {
+    expect(html).toContain('const googleCalendarUrl =');
     expect(html).toContain('const outlookComposeUrl =');
-    expect(html).toContain('deeplink/compose');
-    expect(html).toContain('window.open(url');
+    expect(html).toContain('const icsContent =');
+  });
+
+  it('offers a universal .ics download plus Google/Outlook links', () => {
+    expect(html).toContain('Download .ics');
+    expect(html).toContain("'Google'");
+    expect(html).toContain("'Outlook'");
+    expect(html).toContain('createObjectURL');
   });
 });

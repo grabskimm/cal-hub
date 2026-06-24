@@ -1,24 +1,27 @@
 /**
- * Outlook booking page served at `/book` on the public host. It reads AvailCal's
- * own /slots.json (so only genuinely-free times are offered) and, on click,
- * opens an Outlook compose deeplink prefilled with the slot — the visitor saves
- * it and you (the owner) get the invite. No write credential, no backend:
- * AvailCal stays read-only and the booked event self-removes from availability
- * on the next hourly merge (it lands on a calendar AvailCal already reads).
+ * Provider-agnostic booking page served at `/book` on the public host. It reads
+ * AvailCal's own /slots.json (so only genuinely-free times are offered) and, on
+ * selecting a slot, offers a universal `.ics` download plus Add-to-Google and
+ * Add-to-Outlook quick links — works whatever calendar the booker uses. No write
+ * credential, no backend: AvailCal stays read-only and the booked event
+ * self-removes from availability on the next hourly merge (it lands on a calendar
+ * AvailCal already reads).
+ *
+ * The Google/Outlook links add you (the owner) as guest/invitee, so those paths
+ * notify you on save; the .ics is the universal fallback for any other client.
  */
-import { outlookComposeUrl } from './booking-url';
+import { googleCalendarUrl, icsContent, outlookComposeUrl } from './calendar-links';
 
 export interface BookingPageCfg {
-  owner: string; // owner email (invitee)
+  owner: string; // owner email (invitee/guest)
   title: string; // default event subject
-  flavor: string; // 'office' | 'live'
+  flavor: string; // 'office' | 'live' — which Outlook quick-link to use
   tz: string; // default timezone for slot display + query
   durationMin: string; // default slot length
   slotsBase?: string; // origin for /slots.json ('' = same origin; set when self-hosting)
 }
 
 export function bookingHtml(cfg: BookingPageCfg): string {
-  // Embed the deeplink builder verbatim (single source of truth) + a JSON config.
   const cfgJson = JSON.stringify(cfg);
   return `<!doctype html>
 <html lang="en">
@@ -39,36 +42,47 @@ export function bookingHtml(cfg: BookingPageCfg): string {
   .slots { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
   button.slot { padding: .4rem .7rem; border: 1px solid #2563eb; background: #eff6ff;
     color: #1e40af; border-radius: 6px; cursor: pointer; font: inherit; }
-  button.slot:hover { background: #2563eb; color: #fff; }
+  button.slot:hover, button.slot[aria-pressed=true] { background: #2563eb; color: #fff; }
   .muted { color: #666; font-size: .8rem; }
   #status { margin: .5rem 0; }
+  #actions { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #ddd;
+    padding: .75rem 0; margin-top: 1rem; }
+  #actions a { display: inline-block; margin-right: .5rem; padding: .45rem .8rem;
+    border: 1px solid #16a34a; color: #166534; border-radius: 6px; text-decoration: none; }
+  #actions a:hover { background: #16a34a; color: #fff; }
+  #actions[hidden] { display: none; }
 </style>
 </head>
 <body>
   <h1>Book a time</h1>
-  <p class="muted">Pick an open slot. It opens Outlook with the event prefilled —
-  just press Save and the invite is sent.</p>
+  <p class="muted">Pick an open slot, then add it to your calendar — works with
+  Apple, Google, or Outlook. You (the host) are added as an invitee.</p>
 
   <form id="controls">
     <label>From <input type="date" name="from" /></label>
     <label>To <input type="date" name="to" /></label>
     <label>Timezone <input type="text" name="tz" /></label>
     <label>Slot minutes <input type="number" name="duration" min="5" step="5" /></label>
-    <label>Your name <input type="text" name="title" placeholder="Meeting subject" /></label>
+    <label>Subject <input type="text" name="title" placeholder="Meeting subject" /></label>
   </form>
 
   <div id="status" class="muted">Loading…</div>
   <div id="out"></div>
+  <div id="actions" hidden></div>
 
 <script>
 const CFG = ${cfgJson};
-// Embedded verbatim from booking-url.ts (single source of truth). Bound to a
-// stable name so a minified bundle can't rename it out from under the caller.
+// Embedded verbatim from calendar-links.ts (single source of truth), each bound
+// to a stable name so a minified bundle can't rename it out from under callers.
+const googleCalendarUrl = ${googleCalendarUrl.toString()};
 const outlookComposeUrl = ${outlookComposeUrl.toString()};
+const icsContent = ${icsContent.toString()};
 
 const form = document.getElementById('controls');
 const out = document.getElementById('out');
 const statusEl = document.getElementById('status');
+const actions = document.getElementById('actions');
+let icsUrl = null;
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const today = new Date();
@@ -81,11 +95,32 @@ form.title.value = CFG.title || 'Meeting';
 const fmtTime = (s, tz) => new Date(s).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz });
 const fmtDay = (s, tz) => new Date(s).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
 
+function selectSlot(s, tz, btn) {
+  document.querySelectorAll('button.slot[aria-pressed=true]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+  btn.setAttribute('aria-pressed', 'true');
+  const cfg = { owner: CFG.owner, title: form.title.value || CFG.title };
+  if (icsUrl) URL.revokeObjectURL(icsUrl);
+  icsUrl = URL.createObjectURL(new Blob([icsContent(s, cfg)], { type: 'text/calendar;charset=utf-8' }));
+  const when = fmtDay(s.start, tz) + ' ' + fmtTime(s.start, tz);
+  actions.innerHTML = '';
+  const lbl = document.createElement('span'); lbl.className = 'muted';
+  lbl.textContent = 'Add ' + when + ' to: '; actions.appendChild(lbl);
+  const mk = (text, href, dl) => {
+    const a = document.createElement('a'); a.textContent = text; a.href = href;
+    if (dl) { a.download = 'booking.ics'; } else { a.target = '_blank'; a.rel = 'noopener'; }
+    actions.appendChild(a); return a;
+  };
+  mk('Download .ics', icsUrl, true);
+  mk('Google', googleCalendarUrl(s, cfg), false);
+  mk('Outlook', outlookComposeUrl(s, cfg, CFG.flavor), false);
+  actions.hidden = false;
+}
+
 async function load() {
   const tz = form.tz.value;
   const q = new URLSearchParams({ from: form.from.value, to: form.to.value, tz, duration: form.duration.value });
   statusEl.textContent = 'Loading…';
-  out.innerHTML = '';
+  out.innerHTML = ''; actions.hidden = true;
   try {
     const res = await fetch((CFG.slotsBase || '') + '/slots.json?' + q.toString());
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -104,12 +139,9 @@ async function load() {
       const row = document.createElement('div'); row.className = 'slots';
       for (const s of daySlots) {
         const b = document.createElement('button');
-        b.className = 'slot'; b.type = 'button';
+        b.className = 'slot'; b.type = 'button'; b.setAttribute('aria-pressed', 'false');
         b.textContent = fmtTime(s.start, data.tz);
-        b.addEventListener('click', () => {
-          const url = outlookComposeUrl(s, { owner: CFG.owner, title: form.title.value || CFG.title, flavor: CFG.flavor });
-          window.open(url, '_blank', 'noopener');
-        });
+        b.addEventListener('click', () => selectSlot(s, data.tz, b));
         row.appendChild(b);
       }
       wrap.appendChild(row); out.appendChild(wrap);
