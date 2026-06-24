@@ -165,7 +165,11 @@ def collect_busy(store, labels: dict[str, str], horizon_days: int) -> list[dict]
 def upload(sas_url: str, payload: bytes, token: str | None = None,
            cf_access_client_id: str | None = None,
            cf_access_client_secret: str | None = None) -> None:
-    headers = {"Content-Type": "application/json"}
+    # A descriptive User-Agent. The urllib default ("Python-urllib/3.x") is a
+    # known-bot signature that Cloudflare Bot Fight Mode / WAF blocks with a 403
+    # *before* the request reaches Access or the Worker (so neither logs it).
+    headers = {"Content-Type": "application/json",
+               "User-Agent": "AvailCal-macos-agent/1.0"}
     # Azure Blob needs x-ms-blob-type; an R2/S3 presigned PUT must NOT receive an
     # unsigned header that could break its signature, so add it only for Azure.
     if "blob.core.windows.net" in sas_url:
