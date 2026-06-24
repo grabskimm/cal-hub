@@ -92,6 +92,12 @@ const $ = (id) => document.getElementById(id);
 const tzSel=$('tz'), titleEl=$('title'), statusEl=$('status'), modal=$('modal');
 let cache=[], icsUrl=null;
 
+// Surface any uncaught error on the page itself, so a silent failure becomes
+// visible ("nothing happens" -> a readable message) without needing DevTools.
+function showErr(msg){ if (statusEl){ statusEl.style.color='#dc2626'; statusEl.textContent='⚠ '+msg; } }
+window.addEventListener('error', (e)=> showErr((e && e.message) || 'Unexpected error'));
+window.addEventListener('unhandledrejection', (e)=> showErr((e && e.reason && e.reason.message) || 'Unexpected error'));
+
 buildTzPicker(tzSel, CFG.fallbackTz);
 titleEl.value = CFG.title || 'Meeting';
 
@@ -106,6 +112,7 @@ function linkBtn(text, href, opts) {
 }
 
 function openModal(s, tz) {
+ try {
   const subject = titleEl.value || CFG.title || 'Meeting';
   const when = fmtDayLabel(s.start, tz) + ' · ' + fmtTime(s.start, tz) + '–' + fmtTime(s.end, tz) + ' (' + tz + ')';
   const body = "Hi,\\n\\nI'd like to book \\"" + subject + "\\" on " + when + ".\\n\\nThanks!";
@@ -128,15 +135,20 @@ function openModal(s, tz) {
   cr.appendChild(linkBtn('Download .ics (Apple/other)', icsUrl, { download:true, full:true }));
 
   modal.hidden = false;
+ } catch (err) { showErr('Could not open booking options: ' + (err && err.message ? err.message : err)); }
 }
 function closeModal(){ modal.hidden = true; }
 $('x').addEventListener('click', closeModal);
 modal.addEventListener('click', (e)=>{ if (e.target===modal) closeModal(); });
 document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeModal(); });
 
+// If we arrived from the home page with ?from=YYYY-MM-DD, preselect that date so
+// the chosen day's times appear straight away.
+const fromParam = (new URLSearchParams(location.search).get('from') || '').slice(0, 10);
 const picker = createPicker({
   calEl:$('cal'), timesEl:$('times'), monthLabelEl:$('ml'), prevEl:$('prev'), nextEl:$('next'),
   getTz: ()=>tzSel.value, getSlots: ()=>cache, onTime: (s, tz)=>openModal(s, tz),
+  initialDate: fromParam,
 });
 
 async function load() {

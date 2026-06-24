@@ -207,11 +207,15 @@ function createPicker(opts) {
     })(slots[i]); }
     t.appendChild(wrap);
   }
+  var didInit=false;
   function refresh(){
-    // Note: we deliberately do NOT auto-select a date — the times panel stays
-    // empty (a prompt) until the user picks a day, then it slides in.
+    // We deliberately do NOT auto-select a date — the times panel stays a prompt
+    // until the user picks a day, then it slides in. Exception: an explicit
+    // initialDate (e.g. ?from=) preselects that day once on first load.
     var tz=opts.getTz(); var groups=group(tz); var keys=[...groups.keys()].sort();
     if(selKey && !groups.has(selKey)) selKey=null;
+    if(!selKey && !didInit && opts.initialDate && groups.has(opts.initialDate)) selKey=opts.initialDate;
+    didInit=true;
     var base = selKey || keys[0] || new Date().toLocaleDateString('en-CA',{timeZone:tz});
     var bp=base.split('-'); if(!view) view={y:+bp[0], m:+bp[1]-1};
     renderMonth(tz, groups); renderTimes(tz, groups);
