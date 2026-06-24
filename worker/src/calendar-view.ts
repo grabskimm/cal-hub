@@ -282,6 +282,39 @@ function renderLegend(labels) {
   }
 }
 
+// Pack overlapping intervals into the fewest side-by-side lanes (greedy interval
+// colouring). Mutates each item with .lane (its column index) and .lanes (how
+// many columns its overlap cluster needs), so overlapping events render
+// alongside each other instead of stacked on top.
+function assignLanes(items) {
+  const sorted = items.slice().sort((a,b) => a.startMin - b.startMin || a.endMin - b.endMin);
+  let cluster = [], clusterEnd = -1;
+  const flush = () => {
+    if (!cluster.length) return;
+    const laneEnds = []; // end-minute of the last event placed in each lane
+    for (const it of cluster) {
+      let lane = laneEnds.findIndex((end) => it.startMin >= end);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.endMin); }
+      else laneEnds[lane] = it.endMin;
+      it.lane = lane;
+    }
+    for (const it of cluster) it.lanes = laneEnds.length;
+    cluster = [];
+  };
+  for (const it of sorted) {
+    if (cluster.length && it.startMin >= clusterEnd) { flush(); clusterEnd = -1; }
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.endMin);
+  }
+  flush();
+}
+
+function scrollToNow(tz) {
+  // Land on the current time without manual scrolling: center "now" in the view.
+  const y = (nowMinutes(tz)/1440)*DAY_PX;
+  timeWrap.scrollTop = Math.max(0, y - timeWrap.clientHeight/2);
+}
+
 function renderTimeGrid(tz) {
   const cols = columns();
   const today = todayKey(tz);
@@ -301,20 +334,32 @@ function renderTimeGrid(tz) {
     const body = el('div','colbody','');
     body.style.height = DAY_PX + 'px';
     for (let h=0; h<24; h++) body.appendChild(el('div','hourline',''));
+
+    // Collect this column's events first, then place overlapping ones in
+    // side-by-side lanes so both stay visible instead of stacking.
+    const dayEvs = [];
     for (const ev of events) {
       const s = tzParts(ev.start, tz);
       if (s.dayKey !== c) continue;
       const e = tzParts(ev.end, tz);
       const endMin = (e.dayKey === c) ? e.minutes : 1440;
-      const top = (s.minutes/1440)*DAY_PX;
-      const hgt = Math.max(16, ((endMin - s.minutes)/1440)*DAY_PX);
-      const color = labelColor(ev.source);
-      labels.add(ev.source);
-      const box = el('div','ev' + (ev.status==='tentative'?' tent':''), '');
+      dayEvs.push({ ev, startMin: s.minutes, endMin });
+    }
+    assignLanes(dayEvs);
+    for (const it of dayEvs) {
+      const top = (it.startMin/1440)*DAY_PX;
+      const hgt = Math.max(16, ((it.endMin - it.startMin)/1440)*DAY_PX);
+      const color = labelColor(it.ev.source);
+      labels.add(it.ev.source);
+      const box = el('div','ev' + (it.ev.status==='tentative'?' tent':''), '');
       box.style.top = top+'px'; box.style.height = hgt+'px'; box.style.background = color;
+      // Equal-width lanes within the overlap cluster (left offset + width).
+      box.style.left = 'calc(' + (100*it.lane/it.lanes).toFixed(4) + '% + 2px)';
+      box.style.right = 'auto';
+      box.style.width = 'calc(' + (100/it.lanes).toFixed(4) + '% - 4px)';
       box.innerHTML = '<b></b><br><span></span>';
-      box.querySelector('b').textContent = ev.source;
-      box.querySelector('span').textContent = fmtTime(ev.start, tz) + '–' + fmtTime(ev.end, tz);
+      box.querySelector('b').textContent = it.ev.source;
+      box.querySelector('span').textContent = fmtTime(it.ev.start, tz) + '–' + fmtTime(it.ev.end, tz);
       body.appendChild(box);
     }
     if (c === today) { // current-time line in the viewer's tz
@@ -325,7 +370,7 @@ function renderTimeGrid(tz) {
     gridEl.appendChild(body);
   }
   renderLegend(labels);
-  if (!timeWrap.dataset.scrolled) { timeWrap.scrollTop = 6*HOUR_PX; timeWrap.dataset.scrolled = '1'; }
+  scrollToNow(tz);
 }
 
 function renderMonth(tz) {
@@ -603,6 +648,8 @@ document.getElementById('today').addEventListener('click', () => { anchor = toda
 for (const id of ['day','week','month']) {
   document.getElementById('v-' + id).addEventListener('click', () => { setView(id); render(); });
 }
+// Default to Day view on phones; Week stays the default on desktop.
+if (window.matchMedia('(max-width: 700px)').matches) setView('day');
 load();
 loadNotifications();
 </script>
