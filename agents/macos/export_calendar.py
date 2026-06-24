@@ -181,6 +181,16 @@ def upload(sas_url: str, payload: bytes, token: str | None = None,
     if cf_access_client_id and cf_access_client_secret:
         headers["CF-Access-Client-Id"] = cf_access_client_id
         headers["CF-Access-Client-Secret"] = cf_access_client_secret
+    # Diagnostic (no secrets): records which auth the agent actually sent, so the
+    # launchd run's export.err.log shows whether the Access service token reached
+    # python. A missing cf-access here while the Worker shows no logs == Access
+    # blocked the request at the edge (403) because the headers weren't sent.
+    print(
+        f"upload: PUT {sas_url} "
+        f"[bearer={'yes' if token else 'no'}, "
+        f"cf-access={'yes' if (cf_access_client_id and cf_access_client_secret) else 'no'}]",
+        file=sys.stderr,
+    )
     req = urllib.request.Request(sas_url, data=payload, method="PUT", headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https URL
         if resp.status not in (200, 201):
