@@ -8,6 +8,7 @@
  * tested AND embedded verbatim into the page via `.toString()`.
  */
 import { SHARED_CSS, TZ_PICKER_JS } from './availability-page';
+import { outlookComposeUrl } from './calendar-links';
 
 /** Local calendar date (YYYY-MM-DD) and minutes-from-midnight of a UTC instant in tz. */
 export function tzParts(iso: string, tz: string): { dayKey: string; minutes: number } {
@@ -89,6 +90,31 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
   .month .mev { margin-top:2px; font-size:.64rem; color:#fff; border-radius:4px; padding:1px 4px;
     overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .month .more { font-size:.62rem; color:var(--muted); margin-top:1px; }
+  /* drag-to-select (Day view) -> block time in Outlook */
+  .colbody.selectable { cursor:crosshair; }
+  .selrange { position:absolute; left:2px; right:2px; background:rgba(99,102,241,.22);
+    border:1.5px solid var(--brand); border-radius:6px; z-index:7; pointer-events:none; }
+  .selpop { position:fixed; inset:0; background:rgba(11,16,32,.45); display:flex; align-items:center;
+    justify-content:center; padding:1rem; z-index:60; animation:fade .15s ease; }
+  .selpop[hidden] { display:none !important; }
+  .selpop-card { background:#fff; border-radius:18px; max-width:23rem; width:100%; padding:1.3rem 1.3rem 1.1rem;
+    box-shadow:0 30px 80px rgba(2,6,23,.35); position:relative; }
+  .selpop-card .x { position:absolute; top:.5rem; right:.65rem; border:0; background:transparent; font-size:1.3rem;
+    color:var(--muted); cursor:pointer; line-height:1; }
+  .selpop-h { font-weight:800; font-size:1.05rem; margin-bottom:.2rem; }
+  .selpop-when { color:var(--muted); font-size:.9rem; margin-bottom:.85rem; }
+  .selpop-card input { width:100%; padding:.6rem .7rem; font:inherit; border:1px solid var(--line);
+    border-radius:11px; margin-bottom:.95rem; }
+  .selpop-card input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 4px var(--ring); }
+  .selpop-actions { display:flex; gap:.5rem; justify-content:flex-end; }
+  .btn-ghost2, .btn-primary2 { font:inherit; font-weight:700; border-radius:10px; padding:.55rem .95rem;
+    cursor:pointer; text-decoration:none; }
+  .btn-ghost2 { background:#fff; color:var(--ink); border:1px solid var(--line); }
+  .btn-ghost2:hover { background:#f8fafc; }
+  .btn-primary2 { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; border:0;
+    display:inline-flex; align-items:center; }
+  .btn-primary2:hover { filter:brightness(1.06); }
+  @keyframes fade { from{opacity:0} to{opacity:1} }
   /* "new events" notifications */
   .notify { background:#fff; border:1px solid var(--line); border-left:4px solid var(--brand);
     border-radius:12px; box-shadow:var(--shadow); padding:.9rem 1rem; margin-top:1rem; }
@@ -172,6 +198,19 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
     ${cfg.footer ?? ''}
   </div>
 
+  <div id="selpop" class="selpop" hidden>
+    <div class="selpop-card" role="dialog" aria-modal="true" aria-labelledby="selpop-h">
+      <button class="x" id="selpop-x" aria-label="Close">×</button>
+      <div class="selpop-h" id="selpop-h">Block this time in Outlook</div>
+      <div class="selpop-when" id="selpop-when"></div>
+      <input id="selpop-title" placeholder="Title (optional)" autocomplete="off" />
+      <div class="selpop-actions">
+        <button type="button" id="selpop-cancel" class="btn-ghost2">Cancel</button>
+        <a id="selpop-go" class="btn-primary2" target="_blank" rel="noopener">Open in Outlook →</a>
+      </div>
+    </div>
+  </div>
+
 <script>
 const CFG = ${cfgJson};
 // No-op shim for esbuild keepNames' __name() calls embedded via .toString() (see booking.ts).
@@ -179,6 +218,7 @@ var __name = function (f) { return f; };
 ${TZ_PICKER_JS}
 ${tzParts.toString()}
 ${labelColor.toString()}
+${outlookComposeUrl.toString()}
 
 const HOUR_PX = 44, DAY_PX = HOUR_PX * 24;
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -272,6 +312,7 @@ function renderTimeGrid(tz) {
       const nl = el('div','nowline',''); nl.style.top = ((nowMinutes(tz)/1440)*DAY_PX) + 'px';
       body.appendChild(nl);
     }
+    if (view === 'day') { body.classList.add('selectable'); enableDaySelect(body, c, tz); }
     gridEl.appendChild(body);
   }
   renderLegend(labels);
@@ -319,7 +360,9 @@ function render() {
     renderMonth(tz);
   } else {
     monthEl.hidden = true; timeWrap.hidden = false;
-    hintEl.textContent = view === 'week' ? 'Tip: swipe horizontally to see the full week on small screens.' : '';
+    hintEl.textContent = view === 'week'
+      ? 'Tip: swipe horizontally to see the full week on small screens.'
+      : 'Tip: drag across the hours to block that time in your Outlook calendar.';
     renderTimeGrid(tz);
   }
   periodEl.textContent = periodLabel(tz);
@@ -384,6 +427,78 @@ async function loadNotifications() {
     additions = Array.isArray(data) ? data : [];
     renderNotifications();
   } catch (e) { /* notifications are best-effort */ }
+}
+
+// ---- drag-to-select an hour range (Day view) -> open it in Outlook ----
+const SNAP_MIN = 15;
+const selpop = document.getElementById('selpop');
+const selTitle = document.getElementById('selpop-title');
+const selGo = document.getElementById('selpop-go');
+let selStart = null, selEnd = null; // Date objects (UTC instants)
+
+const minLabel = (m) => { const h = Math.floor(m/60), mi = m%60; const ap = h<12?'AM':'PM'; return ((h%12)||12) + ':' + String(mi).padStart(2,'0') + ' ' + ap; };
+
+// Offset (ms) of tz at a given UTC instant, via formatToParts round-trip.
+function tzOffset(utcMs, tz) {
+  const dtf = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle:'h23',
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const p = {}; for (const x of dtf.formatToParts(new Date(utcMs))) if (x.type !== 'literal') p[x.type] = x.value;
+  return Date.UTC(+p.year, +p.month-1, +p.day, +p.hour, +p.minute, +p.second) - utcMs;
+}
+// Wall-clock (dayKey + minutes) in tz -> the matching UTC instant (DST-safe).
+function zonedToUtc(dayKey, minutes, tz) {
+  const [Y,M,D] = dayKey.split('-').map(Number);
+  const guess = Date.UTC(Y, M-1, D, Math.floor(minutes/60), minutes%60);
+  let utc = guess - tzOffset(guess, tz);
+  utc = guess - tzOffset(utc, tz); // refine once for DST edges
+  return new Date(utc);
+}
+
+function updateGoHref() {
+  if (!selStart || !selEnd) return;
+  const title = (selTitle.value || '').trim();
+  selGo.href = outlookComposeUrl(
+    { start: selStart.toISOString(), end: selEnd.toISOString() },
+    { title: title, owner: '' }, 'office');
+}
+function openSelPop(dayKey, a, b, tz) {
+  selStart = zonedToUtc(dayKey, a, tz); selEnd = zonedToUtc(dayKey, b, tz);
+  const day = new Date(dayKey + 'T12:00:00').toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' });
+  document.getElementById('selpop-when').textContent = day + ' · ' + minLabel(a) + ' – ' + minLabel(b) + ' (' + tz + ')';
+  selTitle.value = ''; updateGoHref();
+  selpop.hidden = false; selpop.style.display = 'flex'; selTitle.focus();
+}
+function closeSel() { selpop.hidden = true; selpop.style.display = 'none'; }
+selTitle.addEventListener('input', updateGoHref);
+document.getElementById('selpop-x').addEventListener('click', closeSel);
+document.getElementById('selpop-cancel').addEventListener('click', closeSel);
+selpop.addEventListener('click', (e) => { if (e.target === selpop) closeSel(); });
+selGo.addEventListener('click', () => setTimeout(closeSel, 0));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !selpop.hidden) closeSel(); });
+
+function enableDaySelect(body, dayKey, tz) {
+  const yToMin = (clientY) => {
+    const r = body.getBoundingClientRect();
+    const y = Math.max(0, Math.min(DAY_PX, clientY - r.top));
+    return Math.max(0, Math.min(1440, Math.round((y/DAY_PX)*1440/SNAP_MIN)*SNAP_MIN));
+  };
+  body.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startMin = yToMin(e.clientY);
+    const sel = el('div','selrange',''); body.appendChild(sel);
+    const draw = (a, b) => { const lo=Math.min(a,b), hi=Math.max(a,b);
+      sel.style.top = (lo/1440*DAY_PX) + 'px'; sel.style.height = Math.max(2, (hi-lo)/1440*DAY_PX) + 'px'; };
+    draw(startMin, startMin);
+    const move = (ev) => draw(startMin, yToMin(ev.clientY));
+    const up = (ev) => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      const endMin = yToMin(ev.clientY); sel.remove();
+      const a = Math.min(startMin, endMin), b = Math.max(startMin, endMin);
+      if (b - a >= SNAP_MIN) openSelPop(dayKey, a, b, tz);
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
 }
 
 async function load() {
