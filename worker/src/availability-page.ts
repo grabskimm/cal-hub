@@ -73,17 +73,18 @@ export const SHARED_CSS = `
   a.chip { text-decoration:none; }
   .empty { text-align:center; color:var(--muted); padding:2.6rem 1rem; }
   footer { text-align:center; color:var(--muted); font-size:.78rem; margin-top:2.2rem; }
-  /* Two distinct cards side by side: the month-calendar and, ALONGSIDE it, a
-     separate times card that fills in once a date is picked (Calendly-style). */
+  /* Two distinct cards side by side. The CALENDAR is the primary card and grows
+     to fill the row so all seven weekday columns are roomy; the times list is a
+     narrower, fixed column beside it (about half the calendar's width). */
   .booklayout { display:flex; gap:1rem; align-items:stretch; flex-wrap:wrap; margin-top:1.1rem; }
   .card { border:1px solid var(--line); border-radius:13px; padding:1rem 1.05rem; background:#fcfdff; }
-  .calcard { flex:0 0 auto; width:21rem; max-width:100%; }
-  .timecard { flex:1 1 14rem; min-width:0; display:flex; flex-direction:column; }
-  .timecard .timescol { overflow-y:auto; max-height:22rem; padding-right:.15rem; }
+  .calcard { flex:1 1 24rem; min-width:19rem; max-width:36rem; }
+  .timecard { flex:0 0 13rem; width:13rem; min-width:0; display:flex; flex-direction:column; }
+  .timecard .timescol { overflow-y:auto; max-height:23rem; padding-right:.15rem; }
   @media (max-width:760px){
     .booklayout { flex-direction:column; }
-    .calcard { width:100%; }
-    .timecard { flex-basis:auto; }
+    .calcard { width:100%; max-width:none; flex-basis:auto; }
+    .timecard { width:100%; flex-basis:auto; }
     .timecard .timescol { max-height:none; }
   }
   .calhead { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }

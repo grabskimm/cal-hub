@@ -70,7 +70,10 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
   /* "now" line across today's column, positioned in the viewer's timezone */
   .nowline { position:absolute; left:0; right:0; height:0; border-top:2px solid #ef4444; z-index:6; pointer-events:none; }
   .nowline::before { content:''; position:absolute; left:-3px; top:-4px; width:7px; height:7px; border-radius:50%; background:#ef4444; }
-  /* month grid */
+  /* month grid. NOTE: an explicit display rule overrides the [hidden] attribute,
+     so the view switcher's hidden=true would NOT hide these without these
+     overrides — otherwise week/month stack on top of each other. */
+  .scroll[hidden], .month[hidden] { display:none !important; }
   .month { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); border:1px solid var(--line);
     border-radius:12px; overflow:hidden; background:#fff; margin-top:.8rem; }
   .month .dow { background:#f8fafc; border-bottom:1px solid var(--line); padding:.4rem; text-align:center;

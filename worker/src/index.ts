@@ -335,8 +335,10 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
       title: calName ? `${calName}'s calendar` : 'My calendar',
       fallbackTz: env.CALENDAR_FALLBACK_TZ ?? 'America/Los_Angeles',
       footer: buildFooter(env),
-      // The home + booking + contact pages live on the PUBLIC host, so link absolutely.
-      homeHref: base || undefined,
+      // Home stays on the PRIVATE side: the calendar itself is the private home,
+      // so point back to it (preserving the token) rather than the public site.
+      // Booking + contact live on the PUBLIC host, so those link absolutely.
+      homeHref: `/calendar${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       bookHref: base ? `${base}/book` : undefined,
       contactHref: contactHref(env) || undefined,
     });
@@ -411,7 +413,7 @@ function esc(s: string): string {
 // Bump this whenever the UI changes. It is shown (tiny) in the footer so you can
 // confirm at a glance WHICH build a page is actually serving — ending any
 // "is this the old cached version?" ambiguity.
-const BUILD_TAG = 'b14 · 2026-06-24 new-event-notifs';
+const BUILD_TAG = 'b15 · 2026-06-24 layout+viewfix';
 
 /** Build the © footer HTML from env (empty when no owner configured). */
 function buildFooter(env: Env): string {
