@@ -9,6 +9,8 @@ ICS.
 - **Script:** `export_calendar.py` (stdlib + PyObjC only).
 - **Schedule:** `com.availcal.export.plist` loaded by **launchd** (hourly).
 - **Installer:** `install.sh` builds the venv, renders the plist, loads the job.
+- **Stuck?** See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — stale-file / wrong
+  interpreter / TCC / `sudo` recovery.
 
 ---
 
