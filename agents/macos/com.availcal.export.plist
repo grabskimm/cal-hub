@@ -6,13 +6,15 @@
     <key>Label</key>
     <string>com.availcal.export</string>
 
-    <!-- install.sh rewrites these paths to your actual install location. -->
+    <!-- install.sh rewrites this to the launcher inside the signed app bundle it
+         builds (__INSTALL_DIR__/AvailCal.app/Contents/MacOS/availcal). Running
+         the bundle's executable gives the job a stable macOS app identity, so
+         the Calendar (TCC) prompt appears and the grant is listed/persisted
+         under "AvailCal". The launcher spawns the venv python as a child, which
+         inherits the app as its responsible process. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>__INSTALL_DIR__/export_calendar.py</string>
-        <string>--sources-toml</string>
-        <string>__INSTALL_DIR__/sources.toml</string>
+        <string>__APP_EXEC__</string>
     </array>
 
     <!-- Run hourly. -->
@@ -34,6 +36,12 @@
         <string>__SAS_URL__</string>
         <key>AVAILCAL_AGENT_TOKEN</key>
         <string>__TOKEN__</string>
+        <!-- Cloudflare Access service token, only if the Worker host is fronted
+             by Access (Zero Trust). Left blank otherwise. -->
+        <key>AVAILCAL_AGENT_CF_ACCESS_CLIENT_ID</key>
+        <string>__CF_ACCESS_ID__</string>
+        <key>AVAILCAL_AGENT_CF_ACCESS_CLIENT_SECRET</key>
+        <string>__CF_ACCESS_SECRET__</string>
     </dict>
 
     <key>StandardOutPath</key>
@@ -41,8 +49,11 @@
     <key>StandardErrorPath</key>
     <string>__INSTALL_DIR__/export.err.log</string>
 
-    <!-- A non-zero exit (fail-loud) is recorded in export.err.log for alerting. -->
+    <!-- A non-zero exit (fail-loud) is recorded in export.err.log for alerting.
+         ProcessType is Standard (not Background) so macOS does not deprioritize
+         the job or suppress the first-run Calendar (TCC) permission prompt — the
+         launchd-spawned python needs its OWN grant, separate from Terminal's. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Standard</string>
 </dict>
 </plist>

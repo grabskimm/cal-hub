@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>availcal</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.availcal.export</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>AvailCal</string>
+    <key>CFBundleDisplayName</key>
+    <string>AvailCal</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <!-- Agent-style app: runs in the GUI session and CAN show the TCC prompt,
+         but never appears in the Dock or app switcher. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <!-- REQUIRED for the calendar prompt to appear. macOS reads these strings
+         from the responsible app's bundle; without them EventKit's request is
+         denied/crashes. macOS 14+ uses the FullAccess key. -->
+    <key>NSCalendarsUsageDescription</key>
+    <string>AvailCal reads your calendars to publish privacy-safe busy/free times. Only {source, start, end, status} leaves the machine.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>AvailCal reads your calendars to publish privacy-safe busy/free times. Only {source, start, end, status} leaves the machine.</string>
+</dict>
+</plist>

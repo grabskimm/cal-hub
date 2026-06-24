@@ -19,9 +19,11 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -162,8 +164,16 @@ def collect_busy(store, labels: dict[str, str], horizon_days: int) -> list[dict]
     return out
 
 
-def upload(sas_url: str, payload: bytes, token: str | None = None) -> None:
-    headers = {"Content-Type": "application/json"}
+def upload(sas_url: str, payload: bytes, token: str | None = None,
+           cf_access_client_id: str | None = None,
+           cf_access_client_secret: str | None = None) -> None:
+    # The upload is sent via the system `curl`, NOT Python's urllib. Cloudflare
+    # Bot Fight Mode / Bot Management fingerprints the TLS/HTTP client and blocks
+    # stdlib urllib with a 403 at the edge — before Access or the Worker, so
+    # neither logs it — while curl's fingerprint is allowed. (Changing the
+    # User-Agent does not help; the block is on the connection fingerprint.)
+    headers = {"Content-Type": "application/json",
+               "User-Agent": "AvailCal-macos-agent/1.0"}
     # Azure Blob needs x-ms-blob-type; an R2/S3 presigned PUT must NOT receive an
     # unsigned header that could break its signature, so add it only for Azure.
     if "blob.core.windows.net" in sas_url:
@@ -172,10 +182,45 @@ def upload(sas_url: str, payload: bytes, token: str | None = None) -> None:
     # authenticate with a Bearer token instead of a signed URL.
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(sas_url, data=payload, method="PUT", headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https URL
-        if resp.status not in (200, 201):
-            die(f"upload returned HTTP {resp.status}")
+    # Optional Cloudflare Access service token, only if the Worker host is fronted
+    # by Access (Zero Trust); harmless when it isn't.
+    if cf_access_client_id and cf_access_client_secret:
+        headers["CF-Access-Client-Id"] = cf_access_client_id
+        headers["CF-Access-Client-Secret"] = cf_access_client_secret
+
+    print(
+        f"upload: PUT {sas_url} via curl "
+        f"[bearer={'yes' if token else 'no'}, "
+        f"cf-access={'yes' if (cf_access_client_id and cf_access_client_secret) else 'no'}]",
+        file=sys.stderr,
+    )
+
+    curl = shutil.which("curl") or "/usr/bin/curl"
+    cmd = [curl, "-sS", "--max-time", "30", "-X", "PUT"]
+    for key, value in headers.items():
+        cmd += ["-H", f"{key}: {value}"]
+    # Read the body from stdin (--data-binary @-) so size/bytes are never a
+    # concern; capture the HTTP status via -w and the response body via -o.
+    cmd += ["--data-binary", "@-", "-w", "%{http_code}"]
+    with tempfile.NamedTemporaryFile() as body_file:
+        cmd += ["-o", body_file.name, sas_url]
+        try:
+            proc = subprocess.run(cmd, input=payload, capture_output=True, timeout=45)
+        except FileNotFoundError:
+            die("curl not found (expected /usr/bin/curl on macOS).")
+        except subprocess.TimeoutExpired:
+            die("upload timed out after 45s (curl).")
+        status = proc.stdout.decode("utf-8", "replace").strip()
+        body = body_file.read().decode("utf-8", "replace")[:1000]
+
+    if proc.returncode != 0 and status in ("", "000"):
+        # Transport-level failure (DNS/TLS/connection), not an HTTP status.
+        die(f"upload failed to connect via curl: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    if status not in ("200", "201"):
+        sent = ", ".join(sorted(headers))  # names only, never values
+        die(f"upload failed: HTTP {status}\n"
+            f"  request headers sent: {sent}\n"
+            f"  response body: {body!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -188,16 +233,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--token", default=os.environ.get("AVAILCAL_AGENT_TOKEN", ""),
                     help="Bearer token for the Cloudflare Worker upload endpoint "
                          "(or AVAILCAL_AGENT_TOKEN)")
+    ap.add_argument("--cf-access-client-id",
+                    default=os.environ.get("AVAILCAL_AGENT_CF_ACCESS_CLIENT_ID", ""),
+                    help="Cloudflare Access service-token Client ID, if the Worker "
+                         "host is behind Access (or AVAILCAL_AGENT_CF_ACCESS_CLIENT_ID)")
+    ap.add_argument("--cf-access-client-secret",
+                    default=os.environ.get("AVAILCAL_AGENT_CF_ACCESS_CLIENT_SECRET", ""),
+                    help="Cloudflare Access service-token Client Secret "
+                         "(or AVAILCAL_AGENT_CF_ACCESS_CLIENT_SECRET)")
     ap.add_argument("--sources-toml", default="./sources.toml")
     ap.add_argument("--horizon-days", type=int, default=90)
+    ap.add_argument("--out", default="",
+                    help="write the busy JSON to this file and skip upload "
+                         "(handy for a manual `curl --data-binary @file` upload)")
     args = ap.parse_args(argv)
 
     if EKEventStore is None:
         die("EventKit/PyObjC not available. Run: "
             "pip install pyobjc-framework-EventKit (macOS 14+).")
 
-    if not args.dry_run and not args.sas_url:
-        die("no --sas-url and AVAILCAL_AGENT_SAS_URL is empty (required unless --dry-run).")
+    if not args.dry_run and not args.out and not args.sas_url:
+        die("no --sas-url and AVAILCAL_AGENT_SAS_URL is empty (required unless --dry-run/--out).")
 
     labels = load_device_labels(args.sources_toml)
 
@@ -215,12 +271,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"warning: 0 busy events in the next {args.horizon_days} days. "
               "Verify this is correct.", file=sys.stderr)
 
+    if args.out:
+        Path(args.out).write_bytes(payload)
+        print(f"Wrote {len(busy)} busy interval(s) to {args.out}. Nothing uploaded.",
+              file=sys.stderr)
+        return 0
+
     if args.dry_run:
         print(payload.decode("utf-8"))
         print(f"\n# DRY RUN: parsed {len(busy)} busy interval(s). Nothing uploaded.")
         return 0
 
-    upload(args.sas_url, payload, token=args.token or None)
+    upload(args.sas_url, payload, token=args.token or None,
+           cf_access_client_id=args.cf_access_client_id or None,
+           cf_access_client_secret=args.cf_access_client_secret or None)
     print(f"Uploaded {len(busy)} busy interval(s).")
     return 0
 
