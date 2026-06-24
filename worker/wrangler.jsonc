@@ -33,19 +33,19 @@
   // Cloudflare account; `wrangler deploy` provisions DNS + TLS and maps each
   // whole hostname to this Worker. Leave commented until the zone exists.
   //
-  //   availcal.example.com       -> private token feed + uploads + /run
-  //   availability.example.com   -> PUBLIC anonymized feed only (see below)
+  //   availcal.mendelg.tech       -> private token feed + uploads + /run
+  //   availability.mendelg.tech   -> PUBLIC anonymized feed only (see below)
   //
   // The *.workers.dev URL keeps working alongside custom domains.
-  // "routes": [
-  //   { "pattern": "availcal.example.com", "custom_domain": true },
-  //   { "pattern": "availability.example.com", "custom_domain": true }
-  // ],
+  "routes": [
+    { "pattern": "availcal.mendelg.tech", "custom_domain": true },
+    { "pattern": " availability.mendelg.tech", "custom_domain": true }
+  ],
 
   // Non-secret config. Secrets (tokens, feed URLs, R2 creds) are set with
   // `wrangler secret put` — see worker/README.md.
   "vars": {
-    "AVAILCAL_DEFAULT_TZ": "America/New_York",
+    "AVAILCAL_DEFAULT_TZ": "America/Los_Angeles",
     "AVAILCAL_HORIZON_DAYS": "90",
     "AVAILCAL_INCLUDE_TENTATIVE": "true",
     "AVAILCAL_R2_BUCKET": "availcal",
@@ -54,7 +54,7 @@
     // write public/availability.ics + public/freebusy.json, and PUBLIC_FEED_HOST
     // to the hostname that serves them WITHOUT a token. Empty host = not exposed.
     "AVAILCAL_EMIT_PUBLIC": "true",
-    "PUBLIC_FEED_HOST": "availability.example.com",
+    "PUBLIC_FEED_HOST": "availability.mendelg.tech",
 
     // Scheduling. Working hours are the OWNER's, interpreted in SCHEDULE_WORK_TZ
     // (the viewer's chosen zone only affects how times are displayed). Default
@@ -75,7 +75,7 @@
     // links). BOOKING_OWNER_EMAIL = the mailbox added as guest/invitee.
     // BOOKING_OUTLOOK_FLAVOR picks the Outlook quick-link: "office" (M365) or
     // "live" (personal outlook.com).
-    "BOOKING_OWNER_EMAIL": "you@example.com",
+    "BOOKING_OWNER_EMAIL": "mendel@mendelg.tech",
     "BOOKING_TITLE": "Meeting",
     "BOOKING_OUTLOOK_FLAVOR": "office"
   },
