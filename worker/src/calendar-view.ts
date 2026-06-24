@@ -140,9 +140,10 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
   <div class="wrap calwrap">
     <div class="panel">
       <div class="toolbar">
-        <div class="field grow">
+        <div class="field tzfield">
           <label for="tz">Time zone</label>
-          <select id="tz"></select>
+          <input id="tz" list="tz-list" autocomplete="off" spellcheck="false" placeholder="Search time zone…" />
+          <datalist id="tz-list"></datalist>
         </div>
         <div class="field">
           <label>View</label>

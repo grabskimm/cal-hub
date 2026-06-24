@@ -78,6 +78,12 @@ describe('calendarHtml', () => {
     expect(html).toContain('nowMinutes');
   });
 
+  it('uses a compact searchable timezone input', () => {
+    expect(html).toContain('id="tz" list="tz-list"');
+    expect(html).toContain('<datalist id="tz-list">');
+    expect(html).not.toContain('<select id="tz">');
+  });
+
   it('has a dismissible new-events notifications area backed by /notifications.json', () => {
     expect(html).toContain('id="notify"');
     expect(html).toContain('/notifications.json?token=');
