@@ -73,11 +73,11 @@ export const SHARED_CSS = `
   a.chip { text-decoration:none; }
   .empty { text-align:center; color:var(--muted); padding:2.6rem 1rem; }
   footer { text-align:center; color:var(--muted); font-size:.78rem; margin-top:2.2rem; }
-  /* mini month-calendar picker — two columns that can never overlap (minmax 0) */
-  .booklayout { display:grid; grid-template-columns: minmax(0, 18rem) minmax(0, 1fr); gap:1.4rem;
-    align-items:start; }
-  .calbox { min-width:0; }
-  @media (max-width:760px){ .booklayout { grid-template-columns:1fr; } }
+  /* picker layout: month-calendar on TOP, times stacked BELOW it — never
+     alongside, so times can't run over the calendar. Both centered + bounded. */
+  .booklayout { display:flex; flex-direction:column; gap:1.1rem; align-items:center; }
+  .calbox { width:100%; max-width:21rem; }
+  @media (max-width:760px){ .calbox { max-width:none; } }
   .calhead { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
   .calhead .ml { font-weight:800; font-size:1rem; }
   .calhead button { border:1px solid var(--line); background:#fff; border-radius:10px; width:2.2rem; height:2.2rem;
@@ -94,11 +94,11 @@ export const SHARED_CSS = `
   .cal-cell.has:active { transform:translateY(1px); }
   .cal-cell.sel { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; box-shadow:0 6px 16px rgba(99,102,241,.4); }
   .cal-cell.today:not(.sel) { box-shadow:inset 0 0 0 2px var(--accent); }
-  /* times: a clean VERTICAL list (Calendly-style), not horizontal chips */
+  /* times: a clean VERTICAL list (Calendly-style) BELOW the calendar */
   .times { display:flex; flex-direction:column; gap:.5rem; margin-top:.3rem; }
-  .times .chip { width:100%; text-align:center; padding:.7rem .8rem; border-radius:12px; font-weight:700; }
-  .picked { font-weight:800; margin:.1rem .1rem .7rem; font-size:.98rem; }
-  .timescol { min-height:6rem; max-height:62vh; overflow-y:auto; padding-right:.15rem; }
+  .times .chip { width:100%; text-align:center; padding:.75rem .8rem; border-radius:12px; font-weight:700; }
+  .picked { font-weight:800; margin:.1rem .1rem .7rem; font-size:.98rem; text-align:center; }
+  .timescol { width:100%; max-width:21rem; min-height:3rem; }
   footer a { color:var(--brand); text-decoration:none; font-weight:600; }
   footer a:hover { text-decoration:underline; }
   /* ---- mobile ---- */
@@ -112,7 +112,7 @@ export const SHARED_CSS = `
     .field { width:100%; } .field select, .field input { min-width:0; width:100%; }
     .grow { flex-basis:100%; }
     a.book { margin-left:0; width:100%; justify-content:center; }
-    .timescol { max-height:none; overflow:visible; }
+    .timescol { max-width:none; }
     .row { grid-template-columns:1fr; }
     .sheet { border-radius:16px 16px 0 0; align-self:flex-end; }
     .modal { align-items:flex-end; padding:0; }

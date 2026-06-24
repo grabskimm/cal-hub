@@ -28,6 +28,13 @@ describe('availabilityHtml', () => {
     expect(SHARED_CSS).toMatch(/\.times \.chip\s*\{[^}]*width:\s*100%/);
   });
 
+  it('places the calendar above the times — never side-by-side', () => {
+    // booklayout is a vertical flex column (calendar on top, times below),
+    // NOT a 2-column grid that puts times alongside the calendar.
+    expect(SHARED_CSS).toMatch(/\.booklayout\s*\{[^}]*flex-direction:\s*column/);
+    expect(SHARED_CSS).not.toMatch(/\.booklayout\s*\{[^}]*grid-template-columns/);
+  });
+
   it('has a mobile breakpoint', () => {
     expect(SHARED_CSS).toContain('@media (max-width:620px)');
   });
