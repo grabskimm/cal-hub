@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import threading
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -196,9 +197,23 @@ def upload(sas_url: str, payload: bytes, token: str | None = None,
         file=sys.stderr,
     )
     req = urllib.request.Request(sas_url, data=payload, method="PUT", headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https URL
-        if resp.status not in (200, 201):
-            die(f"upload returned HTTP {resp.status}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - https URL
+            if resp.status not in (200, 201):
+                die(f"upload returned HTTP {resp.status}")
+    except urllib.error.HTTPError as exc:
+        # Surface WHO rejected us. A Cloudflare WAF/Bot block and an Access block
+        # both 403 but look different in the body + cf-* headers; the Worker only
+        # ever returns 401/201 on this path. Print enough to stop the guessing.
+        body = exc.read().decode("utf-8", "replace")[:1000] if exc.fp else ""
+        cf_ray = exc.headers.get("cf-ray", "-")
+        cf_mit = exc.headers.get("cf-mitigated", "-")
+        server = exc.headers.get("server", "-")
+        sent = ", ".join(sorted(headers))  # names only, never values
+        die(f"upload failed: HTTP {exc.code} {exc.reason}\n"
+            f"  server={server} cf-ray={cf_ray} cf-mitigated={cf_mit}\n"
+            f"  request headers sent: {sent}\n"
+            f"  response body: {body!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
