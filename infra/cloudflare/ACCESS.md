@@ -106,3 +106,25 @@ terraform apply \
   is not involved there.
 - Rotate the feed token on the usual cadence — see
   [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md).
+
+## Identity providers
+
+The built-in **One-time PIN** (email code) needs no IdP setup. To use SSO:
+
+### Microsoft Entra ID (Azure AD)
+
+If the Cloudflare test fails with **`AADSTS500113: No reply address is
+registered for the application`**, the Entra app registration is missing the
+redirect (reply) URL that Access calls back to:
+
+1. Copy the callback URL from **Zero Trust → Settings → Authentication →** your
+   Azure AD login method. It is
+   `https://<your-team-name>.cloudflareaccess.com/cdn-cgi/access/callback`.
+2. In the **Azure portal → Microsoft Entra ID → App registrations →** your app
+   → **Authentication → Platform configurations → Add a platform → Web**, paste
+   that URL under **Redirect URIs** and **Save**.
+3. Make sure the app's **Supported account types** matches who signs in, and
+   that the **Application (client) ID**, **client secret**, and **Directory
+   (tenant) ID** in Cloudflare match the registration.
+4. Re-run the test (propagates within ~a minute).
+

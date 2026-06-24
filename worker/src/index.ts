@@ -376,16 +376,21 @@ function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
 }
 
+// Bump this whenever the UI changes. It is shown (tiny) in the footer so you can
+// confirm at a glance WHICH build a page is actually serving — ending any
+// "is this the old cached version?" ambiguity.
+const BUILD_TAG = 'b6 · 2026-06-24 stacked-times';
+
 /** Build the © footer HTML from env (empty when no owner configured). */
 function buildFooter(env: Env): string {
   const owner = (env.FOOTER_OWNER ?? env.OWNER_NAME ?? '').trim();
-  if (!owner) return '';
   const year = new Date().getUTCFullYear();
   const url = (env.OWNER_SITE_URL ?? '').trim();
   const link = url
     ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//, ''))}</a>`
     : '';
-  return `<footer>© ${year} ${esc(owner)}. All rights reserved.${link}</footer>`;
+  const copyright = owner ? `© ${year} ${esc(owner)}. All rights reserved.${link}` : '';
+  return `<footer>${copyright}<br><span style="opacity:.55;font-size:.7rem">build ${BUILD_TAG}</span></footer>`;
 }
 
 /** Origin of the PUBLIC host (where /book, /contact, / live), or '' if unset. */
