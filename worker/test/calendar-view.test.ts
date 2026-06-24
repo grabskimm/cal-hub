@@ -35,4 +35,22 @@ describe('calendarHtml', () => {
     expect(html).toContain('function tzParts');
     expect(html).toContain('function labelColor');
   });
+
+  it('links booking + contact to the PUBLIC host absolutely (never a private /book)', () => {
+    const withLinks = calendarHtml({
+      title: 'My calendar',
+      fallbackTz: 'America/Los_Angeles',
+      bookHref: 'https://availability.example.com/book',
+      contactHref: 'https://availability.example.com/contact',
+    });
+    expect(withLinks).toContain('href="https://availability.example.com/book"');
+    expect(withLinks).toContain('href="https://availability.example.com/contact"');
+    // The old relative link that 404s on the private host must be gone.
+    expect(withLinks).not.toContain('href="/book"');
+  });
+
+  it('omits the nav links when no public host is configured', () => {
+    expect(html).not.toContain('href="/book"');
+    expect(html).not.toContain('✉ Contact');
+  });
 });
