@@ -78,6 +78,15 @@ describe('calendarHtml', () => {
     expect(html).toContain('nowMinutes');
   });
 
+  it('lets you drag an hour range (Day view) and open it in Outlook', () => {
+    expect(html).toContain('function outlookComposeUrl'); // deep-link builder embedded
+    expect(html).toContain('function enableDaySelect');
+    expect(html).toContain('function zonedToUtc'); // wall-clock -> UTC for the deeplink
+    expect(html).toContain('id="selpop"'); // title prompt popup
+    expect(html).toContain('Open in Outlook');
+    expect(html).toContain("'office'"); // Office 365 flavor
+  });
+
   it('uses a compact timezone dropdown', () => {
     expect(html).toContain('<select id="tz">');
     expect(html).toContain('class="field tzfield"');
