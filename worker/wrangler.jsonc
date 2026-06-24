@@ -39,7 +39,7 @@
   // The *.workers.dev URL keeps working alongside custom domains.
   "routes": [
     { "pattern": "availcal.mendelg.tech", "custom_domain": true },
-    { "pattern": " availability.mendelg.tech", "custom_domain": true }
+    { "pattern": "availability.mendelg.tech", "custom_domain": true }
   ],
 
   // Non-secret config. Secrets (tokens, feed URLs, R2 creds) are set with

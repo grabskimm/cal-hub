@@ -33,12 +33,19 @@ public host. This stays read-only — your page wires the chosen slot into its o
 booking flow. Full param reference:
 [worker/README.md](../worker/README.md#web-scheduling-endpoints-on-the-public-host).
 
-**Booking (any platform):** `GET /book` on the public host turns those free slots
-into a calendar event the booker can add anywhere — a universal `.ics` download
-plus Add-to-Google and Add-to-Outlook links (you're added as invitee/guest). No
-write credential; AvailCal stays read-only. Hosted tools like Calendly can't read
-an external feed, so this page consumes `/slots.json` directly. Details:
+**Booking (any platform):** `GET /book` on the public host lets a visitor pick a
+free slot, then a modal **launches their app** prefilled with the time — email
+the request via Gmail / Outlook / default Mail, or add to Google / Outlook
+calendar, or download a universal `.ics`. No write credential; AvailCal stays
+read-only. Details:
 [worker/README.md](../worker/README.md#booking-provider-agnostic-read-only).
+
+**Embed on your own site:** one `<script src=".../embed.js" data-view="book">`
+tag injects a responsive iframe (or use a plain `<iframe>`). See
+[worker/README.md → Embed](../worker/README.md#embed-on-your-site).
+
+**Your private calendar view:** `https://availcal.<domain>/calendar?token=<FEED_TOKEN>`
+— a labeled week grid of your busy times across every calendar.
 
 > The merged feed is **self-describing**: each block's **title is its source's
 > one word** (e.g. `Work`, `Perso`, `iCloud`), and `CATEGORIES` carries the same

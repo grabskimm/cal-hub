@@ -202,8 +202,17 @@ with permissive CORS (`Access-Control-Allow-Origin: *`):
 | `GET /` | A self-contained demo page that renders bookable slots. |
 | `GET /freebusy.json` | Anonymized busy blocks: `[{"start","end"}]` (UTC). |
 | `GET /slots.json?…` | Computed **free** slots (see params below). |
-| `GET /book` | A **booking page**: free slots → universal .ics / Google / Outlook. |
+| `GET /book` | A **booking page**: free slots → modal that launches Gmail / Outlook / Mail / calendar. |
+| `GET /embed.js` | Embeddable widget script (injects an iframe to `/book` or `/`). |
 | `GET /availability.ics` | The anonymized ICS (calendar subscription). |
+
+Private host (token-gated, on `availcal.<domain>`):
+
+| Path | Returns |
+| --- | --- |
+| `GET /availability.ics?token=…` | merged, labeled feed (calendar subscription) |
+| `GET /calendar?token=…` | **your week calendar view** — busy blocks labeled by source |
+| `GET /busy.json?token=…` | merged, labeled busy blocks as JSON (backs the calendar view) |
 
 `/slots.json` query params (all optional; env sets the defaults):
 
@@ -237,11 +246,13 @@ const { slots } = await r.json();   // [{ start: '2026-06-24T13:00:00.000Z', end
 `GET /book` on the public host is a ready-made booking page that **uses the
 availability AvailCal generates** (it fetches the same `/slots.json`, so only
 genuinely-free times are offered). The booker's platform is unknown, so picking a
-slot offers **three universal add-to-calendar actions**:
+slot opens a **modal that launches their preferred app**, prefilled with the time:
 
-- **Download `.ics`** — works in Apple Calendar, Outlook desktop, or any client.
-- **Add to Google** — a Google Calendar template link (you're added as a guest).
-- **Add to Outlook** — an Outlook web compose deeplink (you're the invitee).
+- **Email the request** — opens **Gmail**, **Outlook mail**, or the **default Mail
+  app** (`mailto:`) composing a message to you with the chosen time.
+- **Add to calendar** — **Google Calendar** / **Outlook Calendar** quick-links
+  (you're added as guest/invitee), or a universal **`.ics`** download for Apple
+  Calendar / Outlook desktop / anything.
 
 The Google/Outlook links add **you (the owner)** as guest/invitee, so saving on
 those paths notifies you; the `.ics` is the universal fallback. There is **no
@@ -267,6 +278,39 @@ Configure it with `vars` in `wrangler.jsonc`:
 > (reminders, reschedule, payments) AND fully-automated booking, point your own
 > backend at `/slots.json` and create events via the provider's API (Google /
 > Microsoft Graph) — that backend, not AvailCal, holds the write credential.
+
+### Your private calendar view
+
+`GET /calendar?token=<FEED_TOKEN>` on the **private** host (e.g.
+`https://availcal.example.com/calendar?token=…`) is a week-grid view of your
+**labeled** busy blocks across every calendar — colored per source, with the
+source name on each block, in a timezone you pick. It's gated by `FEED_TOKEN`
+(the same token as the private feed) and reads `merge/busy.json` from R2.
+
+### Embed on your site
+
+Drop a single `<script>` tag where you want the widget; it injects a responsive
+iframe to the booking page (or the availability page):
+
+```html
+<script src="https://availability.example.com/embed.js"
+        data-view="book"
+        data-height="640"
+        async></script>
+```
+
+`data-view` is `book` (default) or `availability`; `data-height` is px or any CSS
+height. Or embed the iframe directly (no script):
+
+```html
+<iframe src="https://availability.example.com/book"
+        style="width:100%;height:640px;border:0;border-radius:16px"
+        title="Book a time" loading="lazy"></iframe>
+```
+
+Both are token-free (public host) and use your live availability. The pages set
+no `X-Frame-Options`, so they embed anywhere; restrict with a CSP
+`frame-ancestors` on your own site if you want to limit which domains can frame it.
 
 **Self-hosting** your own booking page instead of `/book`: copy the same flow —
 `fetch('https://availability.example.com/slots.json?…')` (CORS is open), render
