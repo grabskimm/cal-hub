@@ -413,7 +413,7 @@ function esc(s: string): string {
 // Bump this whenever the UI changes. It is shown (tiny) in the footer so you can
 // confirm at a glance WHICH build a page is actually serving — ending any
 // "is this the old cached version?" ambiguity.
-const BUILD_TAG = 'b16 · 2026-06-24 modal-polish';
+const BUILD_TAG = 'b17 · 2026-06-24 tz-search';
 
 /** Build the © footer HTML from env (empty when no owner configured). */
 function buildFooter(env: Env): string {

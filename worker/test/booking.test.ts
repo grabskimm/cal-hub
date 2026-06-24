@@ -24,6 +24,13 @@ describe('bookingHtml', () => {
     expect(html).toContain('/slots.json?');
   });
 
+  it('uses a compact searchable timezone input (not a wide select)', () => {
+    expect(html).toContain('id="tz" list="tz-list"');
+    expect(html).toContain('<datalist id="tz-list">');
+    expect(html).toContain('class="field tzfield"');
+    expect(html).not.toContain('<select id="tz">');
+  });
+
   it('embeds the calendar + email launch builders', () => {
     for (const fn of ['const googleCalendarUrl =', 'const outlookComposeUrl =', 'const icsContent =']) {
       expect(html).toContain(fn);

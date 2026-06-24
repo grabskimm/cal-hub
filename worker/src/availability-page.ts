@@ -52,6 +52,10 @@ export const SHARED_CSS = `
     border:1px solid var(--line); border-radius:11px; background:#fff; min-width:11.5rem; transition:border-color .15s, box-shadow .15s; }
   .field select:focus, .field input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 4px var(--ring); }
   .grow { flex:1 1 14rem; }
+  /* Compact, searchable timezone control — doesn't stretch wider than the
+     content beside/below it. */
+  .field.tzfield { flex:0 0 auto; }
+  .field.tzfield input { width:13rem; min-width:0; }
   .btn { display:inline-flex; align-items:center; gap:.45rem; border:0; cursor:pointer; font:inherit;
     font-weight:700; padding:.62rem 1rem; border-radius:11px; text-decoration:none; transition:transform .08s, filter .15s, box-shadow .15s; }
   .btn:active { transform:translateY(1px); }
@@ -124,6 +128,7 @@ export const SHARED_CSS = `
     .panel { margin-top:-2rem; padding:1rem; border-radius:14px; }
     .controls { gap:.7rem; }
     .field { width:100%; } .field select, .field input { min-width:0; width:100%; }
+    .field.tzfield, .field.tzfield input { width:100%; }
     .grow { flex-basis:100%; }
     a.book { margin-left:0; width:100%; justify-content:center; }
     .sheet { border-radius:16px 16px 0 0; align-self:flex-end; }
@@ -156,11 +161,12 @@ export const SHARED_CSS = `
   @keyframes pop { from{opacity:0; transform:translateY(8px) scale(.98)} to{opacity:1; transform:none} }
 `;
 
-// Populates a <select id=tz> with the browser's IANA zones, selects the local
-// one (or a fallback), and exposes window.__tz / a 'change' callback. Embedded
-// into pages that need the timezone picker.
+// Populates a timezone picker with the browser's IANA zones and selects the
+// local one (or a fallback). Works with EITHER a <select> or a compact
+// searchable <input list="…"> + <datalist>; for the input it guards against
+// free-typed invalid zones (reverts and blocks the page's change handler).
 export const TZ_PICKER_JS = `
-function buildTzPicker(selectEl, fallbackTz) {
+function buildTzPicker(el, fallbackTz) {
   let zones = [];
   try { zones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : []; } catch (e) {}
   if (!zones.length) zones = ['America/Los_Angeles','America/Denver','America/Chicago',
@@ -169,13 +175,33 @@ function buildTzPicker(selectEl, fallbackTz) {
   let local = fallbackTz;
   try { local = Intl.DateTimeFormat().resolvedOptions().timeZone || fallbackTz; } catch (e) {}
   if (!zones.includes(local)) zones = [local, ...zones];
-  selectEl.innerHTML = '';
-  for (const z of zones) {
-    const o = document.createElement('option');
-    o.value = z; o.textContent = z.replace(/_/g,' ');
-    if (z === local) o.selected = true;
-    selectEl.appendChild(o);
+
+  if (el.tagName === 'SELECT') {
+    el.innerHTML = '';
+    for (const z of zones) {
+      const o = document.createElement('option');
+      o.value = z; o.textContent = z.replace(/_/g,' ');
+      if (z === local) o.selected = true;
+      el.appendChild(o);
+    }
+    return local;
   }
+
+  // Searchable input backed by a <datalist>.
+  const zoneSet = new Set(zones);
+  const list = el.getAttribute('list') ? document.getElementById(el.getAttribute('list')) : null;
+  if (list) {
+    list.innerHTML = '';
+    for (const z of zones) { const o = document.createElement('option'); o.value = z; o.label = z.replace(/_/g,' '); list.appendChild(o); }
+  }
+  el.value = local; el.dataset.tz = local;
+  el.addEventListener('change', function (e) {
+    if (zoneSet.has(el.value)) { el.dataset.tz = el.value; return; }
+    const m = zones.find((z) => z.toLowerCase() === el.value.toLowerCase() || z.replace(/_/g,' ').toLowerCase() === el.value.toLowerCase());
+    if (m) { el.value = m; el.dataset.tz = m; return; }
+    el.value = el.dataset.tz || local; // invalid free-text -> revert, don't re-render
+    e.stopImmediatePropagation();
+  });
   return local;
 }
 `;
@@ -264,7 +290,11 @@ export function availabilityHtml(cfg: AvailabilityPageCfg): string {
   <div class="wrap">
     <div class="panel">
       <div class="controls">
-        <div class="field grow"><label for="tz">Time zone</label><select id="tz"></select></div>
+        <div class="field tzfield">
+          <label for="tz">Time zone</label>
+          <input id="tz" list="tz-list" autocomplete="off" spellcheck="false" placeholder="Search time zone…" />
+          <datalist id="tz-list"></datalist>
+        </div>
       </div>
       <div class="booklayout">
         <section class="card calcard">
