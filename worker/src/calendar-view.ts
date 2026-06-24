@@ -112,6 +112,9 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
     border-radius:11px; margin-bottom:.95rem; }
   .selpop-card input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 4px var(--ring); }
   .selpop-actions { display:flex; gap:.5rem; justify-content:flex-end; }
+  .selpop-web { display:block; text-align:center; margin-top:.7rem; font-size:.78rem;
+    color:var(--muted); text-decoration:underline; }
+  .selpop-web:hover { color:var(--ink); }
   .btn-ghost2, .btn-primary2 { font:inherit; font-weight:700; border-radius:10px; padding:.55rem .95rem;
     cursor:pointer; text-decoration:none; }
   .btn-ghost2 { background:#fff; color:var(--ink); border:1px solid var(--line); }
@@ -213,6 +216,7 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
         <button type="button" id="selpop-cancel" class="btn-ghost2">Cancel</button>
         <a id="selpop-go" class="btn-primary2" target="_blank" rel="noopener">Open in Outlook →</a>
       </div>
+      <a id="selpop-web" class="selpop-web" target="_blank" rel="noopener" hidden>Open in browser instead</a>
     </div>
   </div>
 
@@ -367,7 +371,7 @@ function render() {
     monthEl.hidden = true; timeWrap.hidden = false;
     hintEl.textContent = view === 'week'
       ? 'Tip: swipe horizontally to see the full week on small screens.'
-      : 'Tip: drag across the hours (on a phone: tap the start, then the end) to block that time in Outlook.';
+      : 'Tip: drag across the hours (on a phone: tap the start, then tap or hold-drag to the end) to block that time in Outlook.';
     renderTimeGrid(tz);
   }
   periodEl.textContent = periodLabel(tz);
@@ -439,6 +443,14 @@ const SNAP_MIN = 15;
 const selpop = document.getElementById('selpop');
 const selTitle = document.getElementById('selpop-title');
 const selGo = document.getElementById('selpop-go');
+const selWeb = document.getElementById('selpop-web');
+// On phones, prefer launching the Outlook app via its URL scheme; on desktop,
+// the web deep link. (Outlook iOS/Android registers ms-outlook://.)
+const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test((navigator.userAgent || ''));
+if (IS_MOBILE) selGo.textContent = 'Open in Outlook app →';
+function outlookAppEventUrl(startIso, endIso, title) {
+  return 'ms-outlook://events/new?' + new URLSearchParams({ title: title || '', start: startIso, end: endIso }).toString();
+}
 let selStart = null, selEnd = null; // Date objects (UTC instants)
 
 const minLabel = (m) => { const h = Math.floor(m/60), mi = m%60; const ap = h<12?'AM':'PM'; return ((h%12)||12) + ':' + String(mi).padStart(2,'0') + ' ' + ap; };
@@ -462,9 +474,14 @@ function zonedToUtc(dayKey, minutes, tz) {
 function updateGoHref() {
   if (!selStart || !selEnd) return;
   const title = (selTitle.value || '').trim();
-  selGo.href = outlookComposeUrl(
-    { start: selStart.toISOString(), end: selEnd.toISOString() },
-    { title: title, owner: '' }, 'office');
+  const startIso = selStart.toISOString(), endIso = selEnd.toISOString();
+  const web = outlookComposeUrl({ start: startIso, end: endIso }, { title: title, owner: '' }, 'office');
+  if (IS_MOBILE) {
+    selGo.href = outlookAppEventUrl(startIso, endIso, title);
+    selWeb.href = web; selWeb.hidden = false; // fallback if the app isn't installed
+  } else {
+    selGo.href = web; selWeb.hidden = true;
+  }
 }
 function openSelPop(dayKey, a, b, tz) {
   selStart = zonedToUtc(dayKey, a, tz); selEnd = zonedToUtc(dayKey, b, tz);
@@ -479,6 +496,7 @@ document.getElementById('selpop-x').addEventListener('click', closeSel);
 document.getElementById('selpop-cancel').addEventListener('click', closeSel);
 selpop.addEventListener('click', (e) => { if (e.target === selpop) closeSel(); });
 selGo.addEventListener('click', () => setTimeout(closeSel, 0));
+selWeb.addEventListener('click', () => setTimeout(closeSel, 0));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !selpop.hidden) closeSel(); });
 
 function enableDaySelect(body, dayKey, tz) {
@@ -507,28 +525,53 @@ function enableDaySelect(body, dayKey, tz) {
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   });
 
-  // Touch: a drag here scrolls the day, so use tap-the-start then tap-the-end.
-  // (A real tap barely moves; a scroll swipe moves a lot — we distinguish them.)
-  let tapStart = null, marker = null, t0 = null;
-  const clearTap = () => { tapStart = null; if (marker) { marker.remove(); marker = null; } statusEl.textContent = ''; };
+  // Touch: tap the start, then EITHER tap the end OR press-and-hold and drag to
+  // the end. A quick swipe still scrolls the day — we only capture the gesture
+  // once a hold (after the start is set) turns it into a drag.
+  let tapStart = null, marker = null, sel = null, t0 = null, holdTimer = null, dragging = false, lastMin = null;
+  const clearTap = () => {
+    tapStart = null; lastMin = null; dragging = false; t0 = null;
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    if (marker) { marker.remove(); marker = null; }
+    if (sel) { sel.remove(); sel = null; }
+    statusEl.textContent = '';
+  };
+  const drawSel = (a, b) => {
+    if (!sel) { sel = el('div','selrange',''); body.appendChild(sel); }
+    const lo = Math.min(a,b), hi = Math.max(a,b);
+    sel.style.top = (lo/1440*DAY_PX) + 'px'; sel.style.height = Math.max(2, (hi-lo)/1440*DAY_PX) + 'px';
+  };
+  const finish = (m) => { const a = Math.min(tapStart, m), b = Math.max(tapStart, m); clearTap();
+    if (b - a >= SNAP_MIN) openSelPop(dayKey, a, b, tz); };
+
   body.addEventListener('touchstart', (e) => {
-    const t = e.touches[0]; t0 = { x: t.clientX, y: t.clientY, time: Date.now() };
-  }, { passive: true });
-  body.addEventListener('touchend', (e) => {
-    if (!t0) return; const t = e.changedTouches[0];
-    const moved = Math.abs(t.clientX - t0.x) + Math.abs(t.clientY - t0.y);
-    const dt = Date.now() - t0.time; t0 = null;
-    if (moved > 12 || dt > 700) return; // a scroll/long-hold, not a tap
-    const m = yToMin(t.clientY);
-    if (tapStart === null) {
-      tapStart = m;
-      marker = el('div','seltap',''); marker.style.top = (m/1440*DAY_PX) + 'px'; body.appendChild(marker);
-      statusEl.textContent = 'Tap the end time to block it →';
-    } else {
-      const a = Math.min(tapStart, m), b = Math.max(tapStart, m); clearTap();
-      if (b - a >= SNAP_MIN) openSelPop(dayKey, a, b, tz);
+    const t = e.touches[0]; t0 = { x: t.clientX, y: t.clientY, time: Date.now() }; dragging = false;
+    if (tapStart !== null) { // start already chosen -> a hold here begins drag-to-end
+      holdTimer = setTimeout(() => {
+        dragging = true; if (marker) { marker.remove(); marker = null; }
+        drawSel(tapStart, yToMin(t0.y)); statusEl.textContent = 'Drag to the end, then release…';
+      }, 260);
     }
   }, { passive: true });
+  body.addEventListener('touchmove', (e) => {
+    const t = e.touches[0]; if (!t0) return;
+    if (dragging) { e.preventDefault(); lastMin = yToMin(t.clientY); drawSel(tapStart, lastMin); return; }
+    if (holdTimer && (Math.abs(t.clientX - t0.x) + Math.abs(t.clientY - t0.y)) > 10) { clearTimeout(holdTimer); holdTimer = null; }
+  }, { passive: false });
+  body.addEventListener('touchend', (e) => {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    const t = e.changedTouches[0];
+    if (dragging) { finish(lastMin != null ? lastMin : yToMin(t.clientY)); return; }
+    if (!t0) return;
+    const moved = Math.abs(t.clientX - t0.x) + Math.abs(t.clientY - t0.y);
+    const dt = Date.now() - t0.time; t0 = null;
+    if (moved > 12 || dt > 700) return; // a scroll / long idle, not a tap
+    const m = yToMin(t.clientY);
+    if (tapStart === null) {
+      tapStart = m; marker = el('div','seltap',''); marker.style.top = (m/1440*DAY_PX) + 'px'; body.appendChild(marker);
+      statusEl.textContent = 'Tap the end — or hold & drag — to block it →';
+    } else { finish(m); }
+  }, { passive: false });
 }
 
 async function load() {
