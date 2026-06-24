@@ -44,8 +44,11 @@
     <key>StandardErrorPath</key>
     <string>__INSTALL_DIR__/export.err.log</string>
 
-    <!-- A non-zero exit (fail-loud) is recorded in export.err.log for alerting. -->
+    <!-- A non-zero exit (fail-loud) is recorded in export.err.log for alerting.
+         ProcessType is Standard (not Background) so macOS does not deprioritize
+         the job or suppress the first-run Calendar (TCC) permission prompt — the
+         launchd-spawned python needs its OWN grant, separate from Terminal's. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Standard</string>
 </dict>
 </plist>

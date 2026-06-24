@@ -147,6 +147,24 @@ cd ~/availcal
    re-toggle it there and re-run. The agent refuses to upload until access is
    real.
 
+> **Important — the Terminal grant ≠ the launchd grant.** macOS attributes a
+> calendar grant to the **responsible process**. A dry run from Terminal grants
+> *Terminal*, so the manual run works — but when **launchd** runs the same python
+> later, there's no Terminal in the chain and it has no grant of its own, so the
+> scheduled job fails with `full calendar access NOT granted` even though the
+> dry run passed. The launchd job needs its **own** grant. After installing
+> (Step 7), trigger a run in your GUI session and approve the prompt it raises:
+>
+> ```bash
+> launchctl kickstart -k gui/$(id -u)/com.availcal.export
+> ```
+>
+> If no prompt appears, clear stale state and try once more:
+> `tccutil reset Calendar && launchctl kickstart -k gui/$(id -u)/com.availcal.export`.
+> The plist uses `ProcessType Standard` specifically so this first-run prompt
+> isn't suppressed. Note: **Full Disk Access does not help** — EventKit is gated
+> by the separate *Calendars* permission class.
+
 ### Step 5 — Dry run (verify the JSON, no upload)
 
 ```bash
@@ -308,10 +326,18 @@ If launchd still reports it, the plist is pointing at a non-venv python — re-r
 must all use the **same** python — `~/availcal/venv/bin/python`. Mixing system,
 Homebrew, and venv pythons is the usual culprit.
 
-**`full calendar access NOT granted`**
-TCC isn't satisfied for the running interpreter. Re-do
-[Step 4](#step-4--grant-calendar-access-tcc) with the **venv** python and toggle
-Python on under *Privacy & Security → Calendars* (Full Access).
+**`full calendar access NOT granted` — but the dry run works fine**
+Classic Terminal-vs-launchd split: your Terminal dry run granted *Terminal*, so
+it passes, but the **launchd** job runs python with no grant of its own and
+fails. Give the launchd job its own grant by kicking it in your GUI session and
+approving the prompt:
+```bash
+launchctl kickstart -k gui/$(id -u)/com.availcal.export
+# no prompt? clear stale state and retry:
+tccutil reset Calendar && launchctl kickstart -k gui/$(id -u)/com.availcal.export
+```
+Confirm under *Privacy & Security → Calendars* that access is **Full Access**
+(not "Add Only"). Full Disk Access does **not** cover EventKit.
 
 **`0 busy events in the next 90 days`**
 Either you really have nothing, or the calendars aren't mapped/visible. List the
