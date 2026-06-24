@@ -18,10 +18,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import urllib.request
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -57,21 +58,44 @@ def die(msg: str) -> None:
 
 
 def slugify(raw: str) -> str:
-    import re
-
     s = re.sub(r"\W+", "_", raw.strip()).strip("_")
     return s or "Unknown"
 
 
+def _parse_device_section(text: str) -> dict[str, str]:
+    """Minimal [device] reader for Python < 3.11 (no tomllib): `"Title" = "Label"`."""
+    out: dict[str, str] = {}
+    section = ""
+    for line in text.splitlines():
+        t = line.strip()
+        if not t or t.startswith("#"):
+            continue
+        m = re.match(r"^\[(.+)\]$", t)
+        if m:
+            section = m.group(1).strip()
+            continue
+        if section == "device":
+            m = re.match(r'^"?([^"=]+?)"?\s*=\s*"([^"]+)"\s*$', t)
+            if m:
+                out[m.group(1).strip()] = m.group(2).strip()
+    return out
+
+
 def load_device_labels(path: str) -> dict[str, str]:
-    """Read the [device] section of sources.toml: calendar title -> label."""
+    """Read the [device] section of sources.toml: calendar title -> label.
+
+    Uses tomllib when available (Python 3.11+), else a minimal built-in parser so
+    older Python still picks up the labels.
+    """
     p = Path(path)
-    if not p.exists() or tomllib is None:
-        print(f"warning: sources.toml not read ({path}); labels will be slugified.",
+    if not p.exists():
+        print(f"warning: sources.toml not found ({path}); labels will be slugified.",
               file=sys.stderr)
         return {}
-    data = tomllib.loads(p.read_text())
-    return dict(data.get("device", {}))
+    text = p.read_text()
+    if tomllib is not None:
+        return dict(tomllib.loads(text).get("device", {}))
+    return _parse_device_section(text)
 
 
 def resolve_label(labels: dict[str, str], title: str) -> str:
@@ -106,7 +130,7 @@ def request_full_access(store) -> int:
 def nsdate_to_utc_iso(nsdate) -> str:
     """Convert an EventKit NSDate to a UTC ISO-8601 string with offset."""
     ts = nsdate.timeIntervalSince1970()
-    return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def collect_busy(store, labels: dict[str, str], horizon_days: int) -> list[dict]:
