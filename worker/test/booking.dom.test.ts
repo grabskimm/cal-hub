@@ -33,16 +33,19 @@ function extractScript(html: string): string {
   return m[1];
 }
 
-/** Drop the page <body> into jsdom and run its script, then let async load() settle. */
+/** Drop the page <body> into jsdom, run its script, wait for the calendar, then
+ *  pick the available date so the times panel slides in (no date is auto-selected). */
 async function bootPage(): Promise<void> {
   const body = HTML.match(/<body>([\s\S]*?)<\/body>/)![1].replace(/<script>[\s\S]*?<\/script>/, '');
   document.body.innerHTML = body;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   new Function(extractScript(HTML))();
-  // Wait for fetch -> json -> picker.refresh() to render the time chips.
-  for (let i = 0; i < 50 && !document.querySelector('#times .chip'); i++) {
+  // Wait for fetch -> json -> picker.refresh() to render the month calendar.
+  for (let i = 0; i < 50 && !document.querySelector('#cal .cal-cell.has'); i++) {
     await new Promise((r) => setTimeout(r, 0));
   }
+  // Nothing shows until a date is picked — click the available day.
+  (document.querySelector('#cal .cal-cell.has') as HTMLButtonElement).click();
 }
 
 beforeEach(() => {

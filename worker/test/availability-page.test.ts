@@ -22,17 +22,17 @@ describe('availabilityHtml', () => {
     expect(html).toContain('© 2026 Mendel Grabski. All rights reserved.');
   });
 
-  it('stacks times vertically (not alongside the calendar)', () => {
-    // The times list is a single vertical column with full-width chips.
+  it('lists each time on its own row (vertical list of full-width chips)', () => {
     expect(SHARED_CSS).toMatch(/\.times\s*\{[^}]*flex-direction:\s*column/);
     expect(SHARED_CSS).toMatch(/\.times \.chip\s*\{[^}]*width:\s*100%/);
   });
 
-  it('places the calendar above the times — never side-by-side', () => {
-    // booklayout is a vertical flex column (calendar on top, times below),
-    // NOT a 2-column grid that puts times alongside the calendar.
-    expect(SHARED_CSS).toMatch(/\.booklayout\s*\{[^}]*flex-direction:\s*column/);
-    expect(SHARED_CSS).not.toMatch(/\.booklayout\s*\{[^}]*grid-template-columns/);
+  it('puts the times panel on the right and slides it in', () => {
+    // Calendly layout: calendar (fixed width) + times column side-by-side,
+    // and the times animate in when shown.
+    expect(SHARED_CSS).toMatch(/\.booklayout\s*\{[^}]*display:\s*flex/);
+    expect(SHARED_CSS).toMatch(/\.times\s*\{[^}]*animation:\s*slidein/);
+    expect(SHARED_CSS).toContain('@keyframes slidein');
   });
 
   it('has a mobile breakpoint', () => {

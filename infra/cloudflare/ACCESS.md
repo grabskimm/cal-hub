@@ -16,11 +16,26 @@ GitHub, one-time email code, …) instead of relying only on the URL token.
 - Scope it to the path `/calendar*` (and optionally `/busy.json`, the data the
   page fetches) so nothing else is affected.
 
-> The page still passes `?token=` to load `/busy.json`, so it keeps working with
-> or without Access. Adding Access simply adds an SSO gate in front. If you later
-> want to drop the token from the URL entirely, gate `/busy.json` with Access too
-> (below) and have the Worker accept a verified Access JWT — tracked as a future
-> enhancement; not required for SSO to work.
+### Drop the URL token — SSO only (implemented)
+
+The Worker can authorize `/calendar` (and the `/busy.json` it fetches) from a
+**verified Access identity** instead of the URL token. Set two non-secret vars
+so the Worker knows which Access tokens to trust:
+
+```bash
+# wrangler.jsonc vars (or `wrangler secret put` if you prefer):
+ACCESS_TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
+ACCESS_AUD         = "<Application Audience (AUD) tag from the Access app>"
+```
+
+Find the **AUD tag** on the Access application's **Overview** page. With both
+set, visiting `https://availcal.<domain>/calendar` after SSO works with **no
+`?token=`** — the Worker validates the Access JWT (signature against your team's
+keys, plus `aud`/`iss`/`exp`). The browser sends the `CF_Authorization` cookie on
+the page's same-origin `/busy.json` fetch, so gating just `/calendar` is enough.
+Leave the two vars empty to keep token-only auth (unchanged).
+
+> The page still accepts `?token=` too, so both methods work side by side.
 
 ## Option A — Dashboard (5 minutes)
 

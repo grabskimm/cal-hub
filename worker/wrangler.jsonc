@@ -94,7 +94,16 @@
     // and falls back to a mailto: link to BOOKING_OWNER_EMAIL.
     "CONTACT_TO": "mendel@mendelg.tech",
     "CONTACT_FROM": "contact@mendelg.tech",
-    "CONTACT_PROVIDER": "resend"
+    "CONTACT_PROVIDER": "resend",
+
+    // Cloudflare Access SSO for the private /calendar (and the /busy.json it
+    // fetches). When BOTH are set, a valid Access identity authorizes those
+    // routes WITHOUT a URL token; leave empty to keep token-only auth. Neither
+    // is secret. ACCESS_TEAM_DOMAIN is your Zero Trust team URL; ACCESS_AUD is
+    // the Application Audience (AUD) tag from the Access app. See
+    // infra/cloudflare/ACCESS.md.
+    "ACCESS_TEAM_DOMAIN": "https://mendelgtech.cloudflareaccess.com",
+    "ACCESS_AUD": "ecddba41d76a4361ef7f21107c1d5009321b7d35e9e2571eb27f401f797d044f"
   },
 
   "observability": { "enabled": true }

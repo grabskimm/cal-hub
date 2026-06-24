@@ -73,11 +73,16 @@ export const SHARED_CSS = `
   a.chip { text-decoration:none; }
   .empty { text-align:center; color:var(--muted); padding:2.6rem 1rem; }
   footer { text-align:center; color:var(--muted); font-size:.78rem; margin-top:2.2rem; }
-  /* picker layout: month-calendar on TOP, times stacked BELOW it — never
-     alongside, so times can't run over the calendar. Both centered + bounded. */
-  .booklayout { display:flex; flex-direction:column; gap:1.1rem; align-items:center; }
-  .calbox { width:100%; max-width:21rem; }
-  @media (max-width:760px){ .calbox { max-width:none; } }
+  /* Calendly-style picker: month-calendar on the LEFT; the times panel slides
+     in on the RIGHT once a date is picked. Stacks vertically on small screens. */
+  .booklayout { display:flex; gap:1.4rem; align-items:flex-start; flex-wrap:wrap; }
+  .calbox { flex:0 0 auto; width:21rem; max-width:100%; }
+  .timescol { flex:1 1 15rem; min-width:0; max-height:26rem; overflow-y:auto; padding-right:.2rem; }
+  @media (max-width:760px){
+    .booklayout { flex-direction:column; }
+    .calbox { width:100%; }
+    .timescol { width:100%; flex-basis:auto; max-height:none; }
+  }
   .calhead { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
   .calhead .ml { font-weight:800; font-size:1rem; }
   .calhead button { border:1px solid var(--line); background:#fff; border-radius:10px; width:2.2rem; height:2.2rem;
@@ -94,11 +99,12 @@ export const SHARED_CSS = `
   .cal-cell.has:active { transform:translateY(1px); }
   .cal-cell.sel { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; box-shadow:0 6px 16px rgba(99,102,241,.4); }
   .cal-cell.today:not(.sel) { box-shadow:inset 0 0 0 2px var(--accent); }
-  /* times: a clean VERTICAL list (Calendly-style) BELOW the calendar */
-  .times { display:flex; flex-direction:column; gap:.5rem; margin-top:.3rem; }
+  /* times: a clean VERTICAL list that slides in from the right when shown */
+  .times { display:flex; flex-direction:column; gap:.5rem; margin-top:.3rem; animation:slidein .28s ease; }
   .times .chip { width:100%; text-align:center; padding:.75rem .8rem; border-radius:12px; font-weight:700; }
-  .picked { font-weight:800; margin:.1rem .1rem .7rem; font-size:.98rem; text-align:center; }
-  .timescol { width:100%; max-width:21rem; min-height:3rem; }
+  .picked { font-weight:800; margin:.1rem .1rem .7rem; font-size:.98rem; animation:slidein .28s ease; }
+  .timescol .empty { color:var(--muted); text-align:center; padding:2rem 1rem; font-size:.9rem; }
+  @keyframes slidein { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:none; } }
   footer a { color:var(--brand); text-decoration:none; font-weight:600; }
   footer a:hover { text-decoration:underline; }
   /* ---- mobile ---- */
@@ -112,7 +118,6 @@ export const SHARED_CSS = `
     .field { width:100%; } .field select, .field input { min-width:0; width:100%; }
     .grow { flex-basis:100%; }
     a.book { margin-left:0; width:100%; justify-content:center; }
-    .timescol { max-width:none; }
     .row { grid-template-columns:1fr; }
     .sheet { border-radius:16px 16px 0 0; align-self:flex-end; }
     .modal { align-items:flex-end; padding:0; }
@@ -192,7 +197,7 @@ function createPicker(opts) {
   }
   function renderTimes(tz, groups){
     var t=opts.timesEl; t.innerHTML='';
-    if(!selKey || !groups.has(selKey)){ t.appendChild(el('div','empty','Select a highlighted date to see times.')); return; }
+    if(!selKey || !groups.has(selKey)){ t.appendChild(el('div','empty','Pick a date to see open times.')); return; }
     var slots=groups.get(selKey);
     t.appendChild(el('div','picked', new Date(slots[0].start).toLocaleDateString([], {weekday:'long', month:'long', day:'numeric', timeZone:tz})));
     var wrap=el('div','times','');
@@ -202,10 +207,15 @@ function createPicker(opts) {
     })(slots[i]); }
     t.appendChild(wrap);
   }
+  var didInit=false;
   function refresh(){
+    // We deliberately do NOT auto-select a date — the times panel stays a prompt
+    // until the user picks a day, then it slides in. Exception: an explicit
+    // initialDate (e.g. ?from=) preselects that day once on first load.
     var tz=opts.getTz(); var groups=group(tz); var keys=[...groups.keys()].sort();
     if(selKey && !groups.has(selKey)) selKey=null;
-    if(!selKey) selKey = keys[0] || null;
+    if(!selKey && !didInit && opts.initialDate && groups.has(opts.initialDate)) selKey=opts.initialDate;
+    didInit=true;
     var base = selKey || keys[0] || new Date().toLocaleDateString('en-CA',{timeZone:tz});
     var bp=base.split('-'); if(!view) view={y:+bp[0], m:+bp[1]-1};
     renderMonth(tz, groups); renderTimes(tz, groups);
@@ -229,6 +239,7 @@ export function availabilityHtml(cfg: AvailabilityPageCfg): string {
 <body>
   <header class="hero">
     <nav class="topnav">
+      <a href="/">⌂ Home</a>
       <span class="spacer"></span>
       ${cfg.contactHref ? `<a href="${escapeHtml(cfg.contactHref)}">✉ Contact</a>` : ''}
     </nav>

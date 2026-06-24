@@ -21,6 +21,7 @@
  */
 import { Container, getContainer } from '@cloudflare/containers';
 
+import { verifyAccessJwt } from './access';
 import { availabilityHtml } from './availability-page';
 import { type BookingPageCfg, bookingHtml } from './booking';
 import { calendarHtml } from './calendar-view';
@@ -82,6 +83,12 @@ export interface Env {
   CONTACT_FROM?: string; // verified sender address (Resend/SendGrid requirement)
   CONTACT_PROVIDER?: string; // 'resend' (default) | 'sendgrid'
   CONTACT_API_KEY?: string; // provider API key (a Worker secret)
+
+  // --- Cloudflare Access SSO for /calendar + /busy.json (optional) ---
+  // When both are set, a valid Access identity authorizes these routes WITHOUT
+  // a URL token. Empty = disabled (token-only, unchanged).
+  ACCESS_TEAM_DOMAIN?: string; // https://<team>.cloudflareaccess.com
+  ACCESS_AUD?: string; // the Access application's Audience (AUD) tag
 }
 
 const MERGED_KEY = 'merged/availability.ics';
@@ -288,16 +295,24 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
   }
 
   // --- owner's labeled busy JSON (backs the calendar view) ---
+  // Authorized by EITHER the URL token OR a verified Cloudflare Access identity
+  // (the page sends the CF_Authorization cookie on this same-origin fetch).
   if (isRead && path === '/busy.json') {
     const token = url.searchParams.get('token') ?? '';
-    if (!safeEqual(token, env.FEED_TOKEN)) return new Response('forbidden', { status: 403 });
+    if (!safeEqual(token, env.FEED_TOKEN) && !(await verifyAccessJwt(request, env))) {
+      return new Response('forbidden', { status: 403 });
+    }
     return serveObject(env, MERGED_BUSY_KEY, 'application/json; charset=utf-8');
   }
 
-  // --- owner's calendar view (token in the URL; the page re-uses it for /busy.json) ---
+  // --- owner's calendar view ---
+  // Token in the URL OR Cloudflare Access SSO (so the token can be dropped once
+  // Access fronts /calendar). The page re-uses whatever got it here for /busy.json.
   if (isRead && path === '/calendar') {
     const token = url.searchParams.get('token') ?? '';
-    if (!safeEqual(token, env.FEED_TOKEN)) return new Response('forbidden', { status: 403 });
+    if (!safeEqual(token, env.FEED_TOKEN) && !(await verifyAccessJwt(request, env))) {
+      return new Response('forbidden', { status: 403 });
+    }
     const calName = (env.OWNER_NAME ?? '').trim();
     const base = publicBase(env);
     const html = calendarHtml({
@@ -379,7 +394,7 @@ function esc(s: string): string {
 // Bump this whenever the UI changes. It is shown (tiny) in the footer so you can
 // confirm at a glance WHICH build a page is actually serving — ending any
 // "is this the old cached version?" ambiguity.
-const BUILD_TAG = 'b6 · 2026-06-24 stacked-times';
+const BUILD_TAG = 'b12 · 2026-06-24 access-sso-on';
 
 /** Build the © footer HTML from env (empty when no owner configured). */
 function buildFooter(env: Env): string {
@@ -390,7 +405,10 @@ function buildFooter(env: Env): string {
     ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//, ''))}</a>`
     : '';
   const copyright = owner ? `© ${year} ${esc(owner)}. All rights reserved.${link}` : '';
-  return `<footer>${copyright}<br><span style="opacity:.55;font-size:.7rem">build ${BUILD_TAG}</span></footer>`;
+  // Build tag lives in an HTML comment — visible in view-source for diagnostics,
+  // but not cluttering the page.
+  const footerHtml = copyright ? `<footer>${copyright}</footer>` : '';
+  return `${footerHtml}<!-- availcal build ${BUILD_TAG} -->`;
 }
 
 /** Origin of the PUBLIC host (where /book, /contact, / live), or '' if unset. */

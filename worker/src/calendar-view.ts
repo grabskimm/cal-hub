@@ -116,6 +116,8 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
 
 <script>
 const CFG = ${cfgJson};
+// No-op shim for esbuild keepNames' __name() calls embedded via .toString() (see booking.ts).
+var __name = function (f) { return f; };
 ${TZ_PICKER_JS}
 ${tzParts.toString()}
 ${labelColor.toString()}
