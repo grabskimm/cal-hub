@@ -24,6 +24,7 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { availabilityHtml } from './availability-page';
 import { type BookingPageCfg, bookingHtml } from './booking';
 import { calendarHtml } from './calendar-view';
+import { EMBED_JS } from './embed';
 import { type Busy, computeSlots, parseDays } from './slots';
 
 export interface Env {
@@ -195,6 +196,15 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
         return serveObject(env, PUBLIC_FREEBUSY_KEY, 'application/json; charset=utf-8', CORS);
       }
       if (path === '/slots.json') return handleSlots(url, env);
+      if (path === '/embed.js') {
+        return new Response(EMBED_JS, {
+          headers: {
+            'Content-Type': 'application/javascript; charset=utf-8',
+            'Cache-Control': 'public, max-age=3600',
+            ...CORS,
+          },
+        });
+      }
       if (path === '/book') {
         const cfg: BookingPageCfg = {
           owner: env.BOOKING_OWNER_EMAIL ?? '',

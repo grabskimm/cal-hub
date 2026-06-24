@@ -1,23 +1,23 @@
 /**
- * Provider-agnostic booking page served at `/book` on the public host. It reads
- * AvailCal's own /slots.json (only genuinely-free times, owner working hours) and
- * on selecting a slot offers a universal `.ics` download plus Add-to-Google and
- * Add-to-Outlook links — works whatever calendar the booker uses. No write
- * credential, no backend: AvailCal stays read-only; the booked event self-removes
- * from availability on the next hourly merge. Times display in a timezone the
- * visitor picks (defaults to local).
+ * Provider-agnostic booking page served at `/book` on the public host. Reads
+ * AvailCal's /slots.json (owner working hours, only free times). Selecting a slot
+ * opens a modal that LAUNCHES the booker's preferred app prefilled with the time:
+ * email the request via Gmail / Outlook / the default Mail app, or add it to
+ * Google / Outlook calendar, or download a universal .ics. No write credential,
+ * no backend — AvailCal stays read-only. Times show in a tz the visitor picks.
  */
 import { SHARED_CSS, TZ_PICKER_JS } from './availability-page';
 import { googleCalendarUrl, icsContent, outlookComposeUrl } from './calendar-links';
+import { gmailComposeUrl, mailtoUrl, outlookMailUrl } from './email-links';
 
 export interface BookingPageCfg {
-  owner: string; // owner email (invitee/guest)
+  owner: string; // owner email (invitee/guest + email recipient)
   title: string; // default event subject
-  flavor: string; // 'office' | 'live' — which Outlook quick-link to use
-  tz: string; // unused for compute; display defaults to viewer local
-  durationMin: string; // shown as a hint only
-  fallbackTz?: string; // tz fallback when local can't resolve
-  slotsBase?: string; // origin for /slots.json ('' = same origin; set when self-hosting)
+  flavor: string; // 'office' | 'live'
+  tz: string;
+  durationMin: string;
+  fallbackTz?: string;
+  slotsBase?: string; // origin for /slots.json ('' = same origin)
 }
 
 export function bookingHtml(cfg: BookingPageCfg): string {
@@ -29,28 +29,17 @@ export function bookingHtml(cfg: BookingPageCfg): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Book a time</title>
-<style>${SHARED_CSS}
-  #actions { position: sticky; bottom: 0; background:#fff; border:1px solid var(--line);
-    border-radius:12px; padding:.8rem 1rem; margin-top:1rem; box-shadow:0 -4px 16px rgba(2,6,23,.06); }
-  #actions[hidden]{ display:none; }
-  #actions a { display:inline-block; margin-right:.5rem; padding:.5rem .85rem; border-radius:9px;
-    text-decoration:none; border:1px solid var(--ok); color:#166534; font-weight:600; }
-  #actions a:hover { background:var(--ok); color:#fff; }
-  .chip[aria-pressed=true]{ background:var(--brand); color:#fff; border-color:var(--brand); }
-</style>
+<style>${SHARED_CSS}</style>
 </head>
 <body>
   <header class="hero">
     <h1>Book a time</h1>
-    <p>Pick an open slot, then add it to your calendar — Apple, Google, or Outlook.</p>
+    <p>Pick an open slot, then finish in your calendar or email — Apple, Google, or Outlook.</p>
   </header>
   <div class="wrap">
     <div class="panel">
       <div class="controls">
-        <div class="field grow">
-          <label for="tz">Time zone</label>
-          <select id="tz"></select>
-        </div>
+        <div class="field grow"><label for="tz">Time zone</label><select id="tz"></select></div>
         <div class="field"><label for="from">From</label><input type="date" id="from" /></div>
         <div class="field"><label for="to">To</label><input type="date" id="to" /></div>
         <div class="field grow"><label for="title">Subject</label><input type="text" id="title" /></div>
@@ -58,60 +47,87 @@ export function bookingHtml(cfg: BookingPageCfg): string {
     </div>
     <div id="status">Loading…</div>
     <div id="out"></div>
-    <div id="actions" hidden></div>
+  </div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+      <button class="x" id="x" aria-label="Close">×</button>
+      <h3 id="mtitle">Finish booking</h3>
+      <p class="muted" id="mwhen" style="margin:.1rem 0 0"></p>
+      <div class="seg">Email the request</div>
+      <div class="row" id="email-row"></div>
+      <div class="seg">or add to your calendar</div>
+      <div class="row" id="cal-row"></div>
+    </div>
   </div>
 
 <script>
 const CFG = ${cfgJson};
 ${TZ_PICKER_JS}
-// Embedded verbatim from calendar-links.ts (single source of truth).
+// Embedded verbatim (single source of truth) from calendar-links.ts/email-links.ts.
 const googleCalendarUrl = ${googleCalendarUrl.toString()};
 const outlookComposeUrl = ${outlookComposeUrl.toString()};
 const icsContent = ${icsContent.toString()};
+const gmailComposeUrl = ${gmailComposeUrl.toString()};
+const outlookMailUrl = ${outlookMailUrl.toString()};
+const mailtoUrl = ${mailtoUrl.toString()};
 
-const tzSel = document.getElementById('tz');
-const fromEl = document.getElementById('from');
-const toEl = document.getElementById('to');
-const titleEl = document.getElementById('title');
-const out = document.getElementById('out');
-const statusEl = document.getElementById('status');
-const actions = document.getElementById('actions');
-let cache = [], icsUrl = null;
+const $ = (id) => document.getElementById(id);
+const tzSel=$('tz'), fromEl=$('from'), toEl=$('to'), titleEl=$('title');
+const out=$('out'), statusEl=$('status'), modal=$('modal');
+let cache=[], icsUrl=null;
 
 buildTzPicker(tzSel, CFG.fallbackTz);
 const isoDate = (d) => d.toISOString().slice(0,10);
 const today = new Date();
 fromEl.value = isoDate(today);
-toEl.value = isoDate(new Date(today.getTime() + 14*864e5));
+toEl.value = isoDate(new Date(today.getTime()+14*864e5));
 titleEl.value = CFG.title || 'Meeting';
 
 const fmtTime = (s, tz) => new Date(s).toLocaleTimeString([], { hour:'numeric', minute:'2-digit', timeZone: tz });
 const fmtDayKey = (s, tz) => new Date(s).toLocaleDateString('en-CA', { timeZone: tz });
 const fmtDayLabel = (s, tz) => new Date(s).toLocaleDateString([], { weekday:'long', month:'long', day:'numeric', timeZone: tz });
 
-function selectSlot(s, tz, btn) {
-  document.querySelectorAll('.chip[aria-pressed=true]').forEach((b)=>b.setAttribute('aria-pressed','false'));
-  btn.setAttribute('aria-pressed','true');
-  const cfg = { owner: CFG.owner, title: titleEl.value || CFG.title };
+function linkBtn(text, href, opts) {
+  const a=document.createElement('a'); a.className='btn '+(opts.cls||'btn-ghost'); a.textContent=text; a.href=href;
+  if (opts.download) a.download='booking.ics'; else { a.target='_blank'; a.rel='noopener'; }
+  if (opts.full) a.classList.add('full');
+  return a;
+}
+
+function openModal(s, tz) {
+  const subject = titleEl.value || CFG.title || 'Meeting';
+  const when = fmtDayLabel(s.start, tz) + ' · ' + fmtTime(s.start, tz) + '–' + fmtTime(s.end, tz) + ' (' + tz + ')';
+  const body = "Hi,\\n\\nI'd like to book \\"" + subject + "\\" on " + when + ".\\n\\nThanks!";
+  const cfg = { owner: CFG.owner, title: subject };
   if (icsUrl) URL.revokeObjectURL(icsUrl);
   icsUrl = URL.createObjectURL(new Blob([icsContent(s, cfg)], { type:'text/calendar;charset=utf-8' }));
-  actions.innerHTML = '';
-  const lbl = document.createElement('span'); lbl.className='muted';
-  lbl.style.marginRight='.5rem';
-  lbl.textContent = 'Add ' + fmtDayLabel(s.start, tz) + ' ' + fmtTime(s.start, tz) + ' to: ';
-  actions.appendChild(lbl);
-  const mk = (text, href, dl) => { const a=document.createElement('a'); a.textContent=text; a.href=href;
-    if (dl) a.download='booking.ics'; else { a.target='_blank'; a.rel='noopener'; } actions.appendChild(a); };
-  mk('Download .ics', icsUrl, true);
-  mk('Google', googleCalendarUrl(s, cfg), false);
-  mk('Outlook', outlookComposeUrl(s, cfg, CFG.flavor), false);
-  actions.hidden = false;
+
+  $('mwhen').textContent = when;
+  const er = $('email-row'); er.innerHTML='';
+  if (CFG.owner) {
+    er.appendChild(linkBtn('Gmail', gmailComposeUrl(CFG.owner, 'Booking request: '+subject, body), { cls:'btn-primary' }));
+    er.appendChild(linkBtn('Outlook', outlookMailUrl(CFG.owner, 'Booking request: '+subject, body, CFG.flavor), { cls:'btn-primary' }));
+    er.appendChild(linkBtn('Default mail app', mailtoUrl(CFG.owner, 'Booking request: '+subject, body), { full:true }));
+  } else {
+    er.innerHTML = '<p class="muted" style="grid-column:1/-1;margin:0">No contact email configured.</p>';
+  }
+  const cr = $('cal-row'); cr.innerHTML='';
+  cr.appendChild(linkBtn('Google Calendar', googleCalendarUrl(s, cfg), {}));
+  cr.appendChild(linkBtn('Outlook Calendar', outlookComposeUrl(s, cfg, CFG.flavor), {}));
+  cr.appendChild(linkBtn('Download .ics (Apple/other)', icsUrl, { download:true, full:true }));
+
+  modal.hidden = false;
 }
+function closeModal(){ modal.hidden = true; }
+$('x').addEventListener('click', closeModal);
+modal.addEventListener('click', (e)=>{ if (e.target===modal) closeModal(); });
+document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeModal(); });
 
 function render() {
   const tz = tzSel.value;
-  out.innerHTML = ''; actions.hidden = true;
-  if (!cache.length) { out.innerHTML = '<div class="empty">No open times in this range.</div>'; return; }
+  out.innerHTML='';
+  if (!cache.length) { out.innerHTML='<div class="empty">No open times in this range.</div>'; return; }
   const byDay = new Map();
   for (const s of cache) {
     const k = fmtDayKey(s.start, tz);
@@ -119,13 +135,13 @@ function render() {
     byDay.get(k).slots.push(s);
   }
   for (const { label, slots } of byDay.values()) {
-    const day = document.createElement('div'); day.className='day';
-    const h = document.createElement('h2'); h.textContent = label; day.appendChild(h);
-    const chips = document.createElement('div'); chips.className='chips';
+    const day=document.createElement('div'); day.className='day';
+    const h=document.createElement('h2'); h.textContent=label; day.appendChild(h);
+    const chips=document.createElement('div'); chips.className='chips';
     for (const s of slots) {
-      const b = document.createElement('button'); b.className='chip'; b.type='button';
-      b.setAttribute('aria-pressed','false'); b.textContent = fmtTime(s.start, tz);
-      b.addEventListener('click', () => selectSlot(s, tz, b));
+      const b=document.createElement('button'); b.className='chip'; b.type='button';
+      b.textContent=fmtTime(s.start, tz);
+      b.addEventListener('click', ()=>openModal(s, tz));
       chips.appendChild(b);
     }
     day.appendChild(chips); out.appendChild(day);
@@ -133,16 +149,16 @@ function render() {
 }
 
 async function load() {
-  statusEl.textContent = 'Loading…';
+  statusEl.textContent='Loading…';
   try {
     const q = new URLSearchParams({ from: fromEl.value, to: toEl.value });
-    const res = await fetch((CFG.slotsBase || '') + '/slots.json?' + q.toString());
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const res = await fetch((CFG.slotsBase||'') + '/slots.json?' + q.toString());
+    if (!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     cache = data.slots || [];
-    statusEl.textContent = cache.length ? (cache.length + ' open times') : 'No open times in this range.';
+    statusEl.textContent = cache.length ? (cache.length+' open times') : 'No open times in this range.';
     render();
-  } catch (e) { statusEl.textContent = 'Could not load: ' + e.message; }
+  } catch (e) { statusEl.textContent='Could not load: '+e.message; }
 }
 
 tzSel.addEventListener('change', render);
