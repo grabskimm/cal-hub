@@ -9,6 +9,7 @@ export interface AvailabilityPageCfg {
   title: string; // friendly heading
   fallbackTz: string; // used if the browser can't resolve a local zone
   footer?: string; // optional footer HTML (copyright/link)
+  contactHref?: string; // when set, shows a "Contact" link in the top nav
 }
 
 // Shared, modern look-and-feel for the public pages.
@@ -27,13 +28,17 @@ export const SHARED_CSS = `
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, sans-serif;
     line-height:1.5; -webkit-font-smoothing:antialiased; }
   .wrap { max-width: 920px; margin:0 auto; padding: 0 1.1rem 4rem; }
-  header.hero { text-align:center; padding: 3rem 1rem 4.4rem; color:#fff;
+  header.hero { text-align:center; padding: 1rem 1rem 4.4rem; color:#fff;
     background: linear-gradient(135deg, var(--brand) 0%, var(--brand2) 55%, var(--accent) 140%);
     position:relative; overflow:hidden; }
-  .hero .home { position:absolute; top:1rem; left:1.1rem; color:#fff; text-decoration:none;
-    font-weight:700; font-size:.88rem; opacity:.9; display:inline-flex; gap:.35rem; align-items:center;
-    background:rgba(255,255,255,.16); padding:.35rem .7rem; border-radius:99px; backdrop-filter:blur(4px); }
-  .hero .home:hover { opacity:1; background:rgba(255,255,255,.26); }
+  /* top navigation strip inside the hero (home / contact) — not overlapping the title */
+  .topnav { display:flex; align-items:center; gap:.5rem; max-width:920px; margin:0 auto 1.5rem;
+    min-height:2.1rem; }
+  .topnav .spacer { margin-left:auto; }
+  .topnav a { color:#fff; text-decoration:none; font-weight:700; font-size:.84rem; opacity:.94;
+    display:inline-flex; gap:.35rem; align-items:center; background:rgba(255,255,255,.16);
+    padding:.42rem .8rem; border-radius:99px; backdrop-filter:blur(4px); white-space:nowrap; }
+  .topnav a:hover { opacity:1; background:rgba(255,255,255,.28); }
   header.hero::after { content:""; position:absolute; inset:auto 0 -1px 0; height:48px;
     background:linear-gradient(to bottom, transparent, var(--bg)); }
   header.hero h1 { margin:0 0 .4rem; font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing:-.02em; font-weight:800; }
@@ -68,9 +73,11 @@ export const SHARED_CSS = `
   a.chip { text-decoration:none; }
   .empty { text-align:center; color:var(--muted); padding:2.6rem 1rem; }
   footer { text-align:center; color:var(--muted); font-size:.78rem; margin-top:2.2rem; }
-  /* mini month-calendar picker */
-  .booklayout { display:grid; grid-template-columns: minmax(0, 19rem) 1fr; gap:1.4rem; align-items:start; }
-  @media (max-width:620px){ .booklayout { grid-template-columns:1fr; } }
+  /* mini month-calendar picker — two columns that can never overlap (minmax 0) */
+  .booklayout { display:grid; grid-template-columns: minmax(0, 18rem) minmax(0, 1fr); gap:1.4rem;
+    align-items:start; }
+  .calbox { min-width:0; }
+  @media (max-width:760px){ .booklayout { grid-template-columns:1fr; } }
   .calhead { display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
   .calhead .ml { font-weight:800; font-size:1rem; }
   .calhead button { border:1px solid var(--line); background:#fff; border-radius:10px; width:2.2rem; height:2.2rem;
@@ -96,8 +103,9 @@ export const SHARED_CSS = `
   footer a:hover { text-decoration:underline; }
   /* ---- mobile ---- */
   @media (max-width:620px){
-    header.hero { padding:2.4rem 1rem 3.6rem; }
-    .hero .home { top:.7rem; left:.7rem; }
+    header.hero { padding:.7rem .9rem 3.6rem; }
+    .topnav { margin-bottom:1.1rem; }
+    .topnav a { font-size:.8rem; padding:.38rem .7rem; }
     .wrap { padding:0 .8rem 3rem; }
     .panel { margin-top:-2rem; padding:1rem; border-radius:14px; }
     .controls { gap:.7rem; }
@@ -220,6 +228,10 @@ export function availabilityHtml(cfg: AvailabilityPageCfg): string {
 </head>
 <body>
   <header class="hero">
+    <nav class="topnav">
+      <span class="spacer"></span>
+      ${cfg.contactHref ? `<a href="${escapeHtml(cfg.contactHref)}">✉ Contact</a>` : ''}
+    </nav>
     <h1>${escapeHtml(cfg.title)}</h1>
     <p>Choose a day, then a time. Shown in your time zone.</p>
   </header>

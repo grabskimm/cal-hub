@@ -24,6 +24,7 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { availabilityHtml } from './availability-page';
 import { type BookingPageCfg, bookingHtml } from './booking';
 import { calendarHtml } from './calendar-view';
+import { contactEnabled, contactHtml, sendContact, validateMessage } from './contact';
 import { EMBED_JS } from './embed';
 import { type Busy, computeSlots, parseDays } from './slots';
 
@@ -75,6 +76,12 @@ export interface Env {
   OWNER_NAME?: string; // personalises headings, e.g. "Book a time with Mendel"
   FOOTER_OWNER?: string; // legal name for the © footer, e.g. "Mendel Grabski"
   OWNER_SITE_URL?: string; // linked from the footer, e.g. https://mendelg.tech
+
+  // --- "Contact me" relay (/contact on the public host) ---
+  CONTACT_TO?: string; // mailbox that receives notes
+  CONTACT_FROM?: string; // verified sender address (Resend/SendGrid requirement)
+  CONTACT_PROVIDER?: string; // 'resend' (default) | 'sendgrid'
+  CONTACT_API_KEY?: string; // provider API key (a Worker secret)
 }
 
 const MERGED_KEY = 'merged/availability.ics';
@@ -191,9 +198,23 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
           title: env.PUBLIC_PAGE_TITLE || (name ? `Find a time with ${name}` : 'Find a time that works'),
           fallbackTz: env.CALENDAR_FALLBACK_TZ ?? 'America/Los_Angeles',
           footer: buildFooter(env),
+          contactHref: contactAvailable(env) ? '/contact' : undefined,
         });
         return new Response(html, {
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
+        });
+      }
+      if (path === '/contact') {
+        const name = (env.OWNER_NAME ?? '').trim();
+        const html = contactHtml({
+          heading: name ? `Contact ${name}` : 'Contact me',
+          homeHref: '/',
+          ownerEmail: env.BOOKING_OWNER_EMAIL,
+          enabled: contactEnabled(env),
+          footer: buildFooter(env),
+        });
+        return new Response(html, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
         });
       }
       if (path === '/availability.ics') return serveObject(env, PUBLIC_KEY);
@@ -220,13 +241,34 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
           durationMin: env.SCHEDULE_SLOT_MINUTES ?? '30',
           heading: name ? `Book a time with ${name}` : 'Book a time',
           footer: buildFooter(env),
+          homeHref: '/',
+          contactHref: contactAvailable(env) ? '/contact' : undefined,
           fallbackTz: env.CALENDAR_FALLBACK_TZ ?? 'America/Los_Angeles',
           slotsBase: '', // same origin
         };
         return new Response(bookingHtml(cfg), {
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
         });
       }
+    }
+    // Contact relay: accept the note and email it to the owner's mailbox.
+    if (request.method === 'POST' && path === '/contact') {
+      if (!contactEnabled(env)) {
+        return jsonResponse({ error: 'Contact relay is not configured.' }, 503);
+      }
+      let payload: Record<string, unknown>;
+      try {
+        payload = (await request.json()) as Record<string, unknown>;
+      } catch {
+        return jsonResponse({ error: 'Invalid request.' }, 400);
+      }
+      if (typeof payload.company === 'string' && payload.company.trim()) {
+        return jsonResponse({ ok: true }, 200); // honeypot: silently accept + drop
+      }
+      const v = validateMessage(payload as Record<string, string>);
+      if (!v.ok) return jsonResponse({ error: v.error }, 400);
+      const sent = await sendContact(env, v.msg);
+      return sent.ok ? jsonResponse({ ok: true }, 200) : jsonResponse({ error: sent.error }, 502);
     }
     return new Response('not found', { status: 404, headers: CORS });
   }
@@ -257,10 +299,14 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     const token = url.searchParams.get('token') ?? '';
     if (!safeEqual(token, env.FEED_TOKEN)) return new Response('forbidden', { status: 403 });
     const calName = (env.OWNER_NAME ?? '').trim();
+    const base = publicBase(env);
     const html = calendarHtml({
       title: calName ? `${calName}'s calendar` : 'My calendar',
       fallbackTz: env.CALENDAR_FALLBACK_TZ ?? 'America/Los_Angeles',
       footer: buildFooter(env),
+      // The booking + contact pages live on the PUBLIC host, so link absolutely.
+      bookHref: base ? `${base}/book` : undefined,
+      contactHref: contactHref(env) || undefined,
     });
     return new Response(html, {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -340,6 +386,23 @@ function buildFooter(env: Env): string {
     ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//, ''))}</a>`
     : '';
   return `<footer>© ${year} ${esc(owner)}. All rights reserved.${link}</footer>`;
+}
+
+/** Origin of the PUBLIC host (where /book, /contact, / live), or '' if unset. */
+function publicBase(env: Env): string {
+  const host = (env.PUBLIC_FEED_HOST ?? '').trim();
+  return host ? `https://${host}` : '';
+}
+
+/** A visitor can reach the owner if a relay is configured OR we have a mailto address. */
+function contactAvailable(env: Env): boolean {
+  return contactEnabled(env) || Boolean((env.BOOKING_OWNER_EMAIL ?? '').trim());
+}
+
+/** Absolute /contact URL on the public host, or '' when contact isn't available. */
+function contactHref(env: Env): string {
+  const base = publicBase(env);
+  return base && contactAvailable(env) ? `${base}/contact` : '';
 }
 
 /**

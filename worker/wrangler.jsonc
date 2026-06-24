@@ -85,7 +85,16 @@
     // "live" (personal outlook.com).
     "BOOKING_OWNER_EMAIL": "mendel@mendelg.tech",
     "BOOKING_TITLE": "Meeting",
-    "BOOKING_OUTLOOK_FLAVOR": "office"
+    "BOOKING_OUTLOOK_FLAVOR": "office",
+
+    // "Contact me" relay (/contact on the public host). CONTACT_TO receives the
+    // notes; CONTACT_FROM must be a sender verified with your provider (Resend or
+    // SendGrid). CONTACT_API_KEY is a SECRET — set it with `wrangler secret put
+    // CONTACT_API_KEY` (never put it here). With no key, /contact still renders
+    // and falls back to a mailto: link to BOOKING_OWNER_EMAIL.
+    "CONTACT_TO": "mendel@mendelg.tech",
+    "CONTACT_FROM": "contact@mendelg.tech",
+    "CONTACT_PROVIDER": "resend"
   },
 
   "observability": { "enabled": true }

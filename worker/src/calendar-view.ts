@@ -39,6 +39,10 @@ export interface CalendarPageCfg {
   title: string;
   fallbackTz: string;
   footer?: string;
+  // The booking + contact pages live on the PUBLIC host, not this private one,
+  // so these must be absolute URLs (e.g. https://availability.example/book).
+  bookHref?: string;
+  contactHref?: string;
 }
 
 export function calendarHtml(cfg: CalendarPageCfg): string {
@@ -78,7 +82,11 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
 </head>
 <body>
   <header class="hero">
-    <a class="home" href="/book">⌂ Booking</a>
+    <nav class="topnav">
+      ${cfg.bookHref ? `<a href="${cfg.bookHref}">⌂ Booking page</a>` : ''}
+      <span class="spacer"></span>
+      ${cfg.contactHref ? `<a href="${cfg.contactHref}">✉ Contact</a>` : ''}
+    </nav>
     <h1>${cfg.title}</h1>
     <p>Your busy times across every calendar. Gaps are free.</p>
   </header>

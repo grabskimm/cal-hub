@@ -107,7 +107,18 @@ npx wrangler secret put AVAILCAL_ICS_FEEDS
 # and the image). Overrides the committed placeholder. e.g.:
 #   printf '[ics]\nGoogPersonal="LoganG"\nOutlookPub="MendelG"\n' | npx wrangler secret put SOURCES_TOML
 npx wrangler secret put SOURCES_TOML
+
+# OPTIONAL: "Contact me" relay (the /contact page on the public host). The API
+# key is the only secret; CONTACT_TO / CONTACT_FROM / CONTACT_PROVIDER live in
+# wrangler.jsonc. Without a key, /contact still renders and falls back to a
+# mailto: link to BOOKING_OWNER_EMAIL. Provider = "resend" (default) or "sendgrid".
+npx wrangler secret put CONTACT_API_KEY
 ```
+
+> **SSO on the private `/calendar`** — put it behind Cloudflare Access (Zero
+> Trust) scoped to `/calendar*`. It's an edge policy: no Worker change, and the
+> token-based feed endpoints are untouched. See
+> [`infra/cloudflare/ACCESS.md`](../infra/cloudflare/ACCESS.md).
 
 ### 6. Validate
 ```bash
@@ -203,6 +214,8 @@ with permissive CORS (`Access-Control-Allow-Origin: *`):
 | `GET /freebusy.json` | Anonymized busy blocks: `[{"start","end"}]` (UTC). |
 | `GET /slots.json?…` | Computed **free** slots (see params below). |
 | `GET /book` | A **booking page**: free slots → modal that launches Gmail / Outlook / Mail / calendar. |
+| `GET /contact` | A **"contact me" note form** (relays to your mailbox; mailto: fallback). |
+| `POST /contact` | Relay endpoint: `{name,email,message}` → emailed to `CONTACT_TO` via Resend/SendGrid. |
 | `GET /embed.js` | Embeddable widget script (injects an iframe to `/book` or `/`). |
 | `GET /availability.ics` | The anonymized ICS (calendar subscription). |
 

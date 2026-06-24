@@ -18,6 +18,8 @@ export interface BookingPageCfg {
   durationMin: string;
   heading: string; // hero heading, e.g. "Book a time with Mendel"
   footer?: string; // optional footer HTML (copyright/link)
+  homeHref?: string; // "Home" link target (defaults to '/')
+  contactHref?: string; // when set, shows a "Contact" link in the top nav
   fallbackTz?: string;
   slotsBase?: string; // origin for /slots.json ('' = same origin)
 }
@@ -35,7 +37,11 @@ export function bookingHtml(cfg: BookingPageCfg): string {
 </head>
 <body>
   <header class="hero">
-    <a class="home" href="/">⌂ Home</a>
+    <nav class="topnav">
+      <a href="${escapeHtml(cfg.homeHref ?? '/')}">⌂ Home</a>
+      <span class="spacer"></span>
+      ${cfg.contactHref ? `<a href="${escapeHtml(cfg.contactHref)}">✉ Contact</a>` : ''}
+    </nav>
     <h1>${escapeHtml(cfg.heading)}</h1>
     <p>Choose a day, then a time. Shown in your time zone.</p>
   </header>
