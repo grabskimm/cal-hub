@@ -1,7 +1,7 @@
 name: Deploy (Cloudflare)
 
-# Manual or tag-triggered deploy of the Worker + merge Container to Cloudflare.
-# Requires a plan with Containers (Enterprise).
+# Deploys the Worker + merge Container to Cloudflare on every merge to main
+# (plus manual run and version tags). Requires a plan with Containers (Enterprise).
 #
 # Repo configuration (Settings -> Secrets and variables -> Actions):
 #   Secrets:  CLOUDFLARE_API_TOKEN   (Workers Scripts:Edit, Workers R2 Storage:Edit,
@@ -10,9 +10,16 @@ name: Deploy (Cloudflare)
 # App secrets (FEED_TOKEN, AGENT_TOKEN, RUN_TOKEN, AVAILCAL_R2_*, AVAILCAL_ICS_FEEDS)
 # are set once out-of-band with `wrangler secret put` — they are NOT in this file.
 on:
-  workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
+    # Only redeploy when something that affects the deploy changed (avoids a
+    # full container rebuild on docs-only merges). Remove this to deploy on
+    # every merge to main.
+    paths:
+      - 'worker/**'
+      - 'merge/**'
+      - '.github/workflows/deploy-cloudflare.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
