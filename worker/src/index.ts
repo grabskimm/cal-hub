@@ -575,9 +575,14 @@ function serveChatPage(env: Env, mode: ChatMode): Response {
   const greeting = assistant
     ? `Hi! I'm ${name || 'the owner'}'s assistant. Ask me about ${name || 'them'} — what they work on, how to get in touch — or tell me when you'd like to meet and I'll find a time.`
     : `Hi! Tell me roughly when you'd like to meet${name ? ` ${name}` : ''} — e.g. "30 minutes next week, afternoons" — and I'll find open times.`;
+  // On the standalone assistant host, "Home" should lead to the owner's actual
+  // site rather than circling back to the scheduling host; fall back to the
+  // public availability home when no site URL is configured.
+  const ownerSite = (env.OWNER_SITE_URL ?? '').trim();
+  const homeHref = assistant && ownerSite ? ownerSite : `${base}/`;
   const cfg: ChatPageCfg = {
     heading,
-    homeHref: `${base}/`,
+    homeHref,
     bookHref: `${base}/book`,
     footer: buildFooter(env),
     turnstileSiteKey: turnstileEnabled(env) ? (env.TURNSTILE_SITE_KEY ?? '') : '',

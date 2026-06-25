@@ -38,7 +38,11 @@ ${THEME_HEAD}
   .composer button { border:0; cursor:pointer; font:inherit; font-weight:700; color:#fff; padding:.7rem 1.1rem; border-radius:12px;
     background:linear-gradient(135deg,var(--brand),var(--brand2)); }
   .composer button:disabled { opacity:.6; cursor:default; }
-  .cf-turnstile { margin:.7rem 0 0; }
+  /* interaction-only: the widget is invisible and zero-height until a real
+     challenge is needed, so it never clutters the chat. Centered + small when it
+     does appear. */
+  .cf-turnstile { display:flex; justify-content:center; margin:.5rem 0 0; min-height:0; }
+  .cf-turnstile:empty { margin:0; }
   .hint { color:var(--muted); font-size:.8rem; margin:.6rem .2rem 0; }
 </style>
 ${cfg.turnstileSiteKey ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
@@ -57,11 +61,11 @@ ${cfg.turnstileSiteKey ? '<script src="https://challenges.cloudflare.com/turnsti
   <div class="wrap chatwrap">
     <div class="panel">
       <div class="thread" id="thread"></div>
-      ${cfg.turnstileSiteKey ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(cfg.turnstileSiteKey)}"></div>` : ''}
       <div class="composer">
         <input id="msg" type="text" autocomplete="off" placeholder="e.g. 30 min next week, afternoons…" />
         <button id="send" type="button">Send</button>
       </div>
+      ${cfg.turnstileSiteKey ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(cfg.turnstileSiteKey)}" data-appearance="interaction-only" data-size="flexible"></div>` : ''}
       <p class="hint">Bookings create a real calendar invite. Be specific about the day and time of day.</p>
     </div>
     ${cfg.footer ?? ''}
@@ -89,7 +93,7 @@ async function send() {
   if (CFG.turnstile) {
     const t = document.querySelector('[name=cf-turnstile-response]');
     turnstile = (t && t.value) || '';
-    if (!turnstile) { add('bot', 'Please complete the verification below first.'); return; }
+    if (!turnstile) { add('bot', "Just a sec — finishing a quick security check. Please resend in a moment (complete the check below if one appears)."); return; }
   }
   input.value = ''; add('user', text); messages.push({ role: 'user', content: text });
   busy = true; sendBtn.disabled = true;
