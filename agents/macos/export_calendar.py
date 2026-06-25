@@ -53,6 +53,11 @@ _AVAILABILITY_TO_STATUS = {
 # EKAuthorizationStatus.fullAccess (macOS 14+) == 3.
 _AUTH_FULL_ACCESS = 3
 
+# Sentinel labels in sources.toml that mean "exclude this calendar entirely".
+# Useful for subscribed calendars (e.g. holidays) whose all-day events report
+# availability as NotSupported and would otherwise be published as busy.
+_SKIP_LABELS = {"-", "skip", "none", "ignore", "exclude"}
+
 
 def die(msg: str) -> None:
     print(f"AvailCal macOS agent FAILED: {msg}", file=sys.stderr)
@@ -154,9 +159,11 @@ def collect_busy(store, labels: dict[str, str], horizon_days: int) -> list[dict]
         status = _AVAILABILITY_TO_STATUS.get(int(ev.availability()), "busy")
         if status is None:
             continue  # free
-        cal_title = ev.calendar().title()
+        source = resolve_label(labels, str(ev.calendar().title()))
+        if source.strip().lower() in _SKIP_LABELS:
+            continue  # calendar explicitly excluded in sources.toml (e.g. "-")
         out.append({
-            "source": resolve_label(labels, str(cal_title)),
+            "source": source,
             "start": nsdate_to_utc_iso(ev.startDate()),
             "end": nsdate_to_utc_iso(ev.endDate()),
             "status": status,

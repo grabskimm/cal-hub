@@ -116,7 +116,15 @@ the `source` field in the feed and the `/raw/<Label>.json` upload path.
 "Work"      = "Work"
 "Personal"  = "Home"
 "iCloud"    = "iCloud"
+"US Holidays" = "-"   # "-" (or skip/none/ignore/exclude) drops this calendar entirely
 ```
+
+**Excluding a calendar:** map its title to `"-"` (or `skip`/`none`/`ignore`/
+`exclude`) to drop it from the feed. This is the fix for subscribed **holiday**
+or birthday calendars — their all-day events report availability as
+*NotSupported*, which the agent treats as **busy** (it never publishes "free"
+when unsure), so they'd otherwise show up as meetings. Exclusion takes effect on
+the next agent run (no restart).
 
 To list the exact calendar names macOS sees (so they match precisely), run:
 
