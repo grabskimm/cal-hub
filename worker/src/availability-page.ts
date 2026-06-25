@@ -47,17 +47,22 @@ export const SHARED_CSS = `
     --hero-grad: linear-gradient(135deg,#2a2363 0%,#3a2a63 55%,#163a52 140%);
   }
   * { box-sizing:border-box; }
-  html { -webkit-text-size-adjust:100%; }
-  body { margin:0; color:var(--ink); background:
+  /* Reserve the scrollbar gutter on BOTH sides so a page with a vertical
+     scrollbar centers identically to one without it (otherwise centered content
+     shifts ~15px between pages). overflow-x:clip kills any stray horizontal
+     overflow that would let the page scroll sideways and look off-center, without
+     clipping fixed-position UI (the chat pop-up). */
+  html { -webkit-text-size-adjust:100%; scrollbar-gutter:stable both-edges; }
+  body { margin:0; overflow-x:clip; color:var(--ink); background:
       radial-gradient(1200px 500px at 50% -200px, var(--glow) 0%, rgba(238,242,255,0) 60%), var(--bg);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, sans-serif;
     line-height:1.5; -webkit-font-smoothing:antialiased; }
   .wrap { max-width: 860px; margin:0 auto; padding: 0 1.1rem 4rem; }
-  header.hero { text-align:center; padding: 1rem 1rem 4.4rem; color:#fff;
+  header.hero { text-align:center; padding: 1rem 1.1rem 4.4rem; color:#fff;
     background: var(--hero-grad);
     position:relative; overflow:hidden; }
   /* top navigation strip inside the hero (home / contact) — not overlapping the title */
-  .topnav { display:flex; align-items:center; gap:.5rem; max-width:920px; margin:0 auto 1.5rem;
+  .topnav { display:flex; align-items:center; gap:.5rem; max-width:860px; margin:0 auto 1.5rem;
     min-height:2.1rem; }
   .topnav .spacer { margin-left:auto; }
   .topnav a { color:#fff; text-decoration:none; font-weight:700; font-size:.84rem; opacity:.94;

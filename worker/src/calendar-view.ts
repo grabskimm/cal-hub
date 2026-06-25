@@ -153,11 +153,25 @@ ${THEME_HEAD}
   .stats .stat .val .u { font-size:.85rem; font-weight:700; color:var(--muted); margin-left:1px; }
   .stats .stat .sub { font-size:.72rem; color:var(--muted); margin-top:.1rem; }
   @media (max-width:520px){ .stats .stat .val { font-size:1.25rem; } }
-  .grid { display:grid; grid-template-columns: 3.2rem repeat(7, minmax(5.2rem, 1fr)); border:1px solid var(--line);
-    border-radius:12px; overflow:hidden; background:var(--card); margin-top:.8rem; min-width:680px; }
-  .grid .head { background:var(--card2); border-bottom:1px solid var(--line); padding:.4rem; text-align:center;
-    font-size:.78rem; font-weight:600; }
+  /* grid-template-columns + min-width are set per-view in JS (renderTimeGrid):
+     week fits the width (no floor), day keeps roomier columns. */
+  .grid { display:grid; grid-template-columns: 3.2rem repeat(7, minmax(0, 1fr)); border:1px solid var(--line);
+    border-radius:12px; overflow:hidden; background:var(--card); margin-top:.8rem; }
+  .grid .head { background:var(--card2); border-bottom:1px solid var(--line); padding:.4rem .25rem; text-align:center;
+    font-size:.78rem; font-weight:600; overflow:hidden; }
   .grid .head.today { color:var(--brand); }
+  /* compact two-line week header (weekday over day number) */
+  .grid .head .wd { display:block; font-size:.66rem; line-height:1.1; color:var(--muted); }
+  .grid .head.today .wd { color:var(--brand); }
+  .grid .head .dn2 { display:block; font-size:.82rem; font-weight:800; line-height:1.15; }
+  /* Fit-to-width on small screens: shrink fonts only (row heights stay 44px so
+     event positions stay aligned). */
+  @media (max-width:620px){
+    .grid .head { font-size:.62rem; padding:.3rem .1rem; }
+    .grid .head .wd { font-size:.56rem; } .grid .head .dn2 { font-size:.72rem; }
+    .gutcell { font-size:.55rem; padding-right:.15rem; }
+    .ev { font-size:.58rem; padding:1px 3px; }
+  }
   .gutcell { border-bottom:1px dashed var(--line); height:44px; font-size:.66rem; color:var(--muted);
     text-align:right; padding-right:.3rem; }
   .scroll { max-height:70vh; overflow:auto; -webkit-overflow-scrolling:touch; border-radius:12px; }
@@ -406,12 +420,30 @@ function renderStats(tz) {
 function renderTimeGrid(tz) {
   const cols = columns();
   const today = todayKey(tz);
-  gridEl.style.gridTemplateColumns = '3.2rem repeat(' + cols.length + ', minmax(5.2rem, 1fr))';
-  gridEl.style.minWidth = view === 'week' ? '680px' : '0';
+  // Week view fits the screen width: columns shrink to share the available
+  // width (no 680px floor / no per-column min), so there's no horizontal
+  // panning on mobile or a narrow window. Day view keeps roomier columns.
+  const isWeek = view === 'week';
+  gridEl.style.gridTemplateColumns = (isWeek ? '2.4rem' : '3.2rem') +
+    ' repeat(' + cols.length + ', minmax(' + (isWeek ? '0' : '5.2rem') + ', 1fr))';
+  gridEl.style.minWidth = '0';
   gridEl.innerHTML = '';
 
   gridEl.appendChild(el('div','head',''));
-  for (const c of cols) gridEl.appendChild(el('div','head' + (c===today?' today':''), colLabel(c)));
+  for (const c of cols) {
+    const h = el('div','head' + (c===today?' today':''), '');
+    if (isWeek) {
+      // Compact two-line header (weekday over day number) so it stays legible
+      // in a narrow fit-to-width column.
+      const d = new Date(c + 'T12:00:00');
+      const wd = el('span','wd', d.toLocaleDateString([], { weekday:'short' }));
+      const dn = el('span','dn2', d.toLocaleDateString([], { day:'numeric' }));
+      h.appendChild(wd); h.appendChild(dn);
+    } else {
+      h.textContent = colLabel(c);
+    }
+    gridEl.appendChild(h);
+  }
 
   const gutter = el('div','', '');
   for (let h=0; h<24; h++) gutter.appendChild(el('div','gutcell', h===0?'' : (h%12||12) + (h<12?' AM':' PM')));
