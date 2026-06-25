@@ -35,6 +35,12 @@ describe('parseAction', () => {
     expect(parseAction('hello there').kind).toBe('reply');
     expect(parseAction('{not json').kind).toBe('reply');
   });
+  it('tolerates non-string model output (object / null) without throwing', () => {
+    // The AI binding sometimes hands back an object instead of a string.
+    expect(parseAction({ kind: 'propose', partOfDay: 'morning', reply: 'hi' } as unknown).kind).toBe('propose');
+    expect(parseAction(null as unknown).kind).toBe('reply');
+    expect(parseAction(undefined as unknown).kind).toBe('reply');
+  });
   it('drops invalid enum / day values', () => {
     const a = parseAction('{"kind":"propose","partOfDay":"midnight","days":[9,1],"meeting":"skype"}');
     expect(a.partOfDay).toBeUndefined();
