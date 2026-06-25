@@ -195,8 +195,11 @@ def upload(sas_url: str, payload: bytes, token: str | None = None,
         headers["CF-Access-Client-Id"] = cf_access_client_id
         headers["CF-Access-Client-Secret"] = cf_access_client_secret
 
+    # Log only the URL path, never the query string: Azure/R2 presigned URLs
+    # carry credentials there, which must not land in export.err.log.
+    safe_url = sas_url.split("?", 1)[0]
     print(
-        f"upload: PUT {sas_url} via curl "
+        f"upload: PUT {safe_url} via curl "
         f"[bearer={'yes' if token else 'no'}, "
         f"cf-access={'yes' if (cf_access_client_id and cf_access_client_secret) else 'no'}]",
         file=sys.stderr,

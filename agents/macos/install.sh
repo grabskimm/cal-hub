@@ -113,7 +113,9 @@ fi
 mkdir -p "$LAUNCH_AGENTS"
 
 # Render the plist template with concrete paths + upload URL + token (escaped).
-esc() { printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'; }
+# Escape backslash first, then the sed delimiter '/' and the replacement-special
+# '&', so a value containing any of them can't corrupt the rendered plist.
+esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/[/&]/\\&/g'; }
 sed -e "s/__INSTALL_DIR__/$(esc "$INSTALL_DIR")/g" \
     -e "s/__APP_EXEC__/$(esc "$APP_EXEC")/g" \
     -e "s/__SAS_URL__/$(esc "$SAS_URL")/g" \
