@@ -52,6 +52,8 @@ export function bookingHtml(cfg: BookingPageCfg): string {
   .req .rstatus.ok { color:var(--ok); font-weight:700; }
   .req .rstatus.err { color:#dc2626; font-weight:700; }
   .req .cf-turnstile { margin:.6rem 0; }
+  #confirmed .okmark { color:#16a34a; }
+  #confirmed h3 { margin:.2rem 0 .1rem; }
 </style>
 ${cfg.scheduling?.enabled && cfg.scheduling.turnstileSiteKey
   ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>'
@@ -92,6 +94,7 @@ ${cfg.scheduling?.enabled && cfg.scheduling.turnstileSiteKey
   <div id="modal" class="modal" hidden>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mtitle">
       <button class="x" id="x" aria-label="Close">×</button>
+      <div id="book-body">
       <div class="mhead" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/><path d="m9 14 2 2 4-4"/></svg>
       </div>
@@ -120,6 +123,17 @@ ${cfg.scheduling?.enabled && cfg.scheduling.turnstileSiteKey
           : ''}
         <button class="btn btn-primary full" id="r-send" type="button">Send booking request</button>
         <p class="rstatus" id="r-status"></p>
+      </div>` : ''}
+      </div>
+      ${cfg.scheduling?.enabled ? `
+      <div id="confirmed" hidden>
+        <div class="mhead okmark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>
+        </div>
+        <h3>You're booked!</h3>
+        <p class="mwhen" id="c-when"></p>
+        <p class="msub">We emailed an invite to <b id="c-email"></b>.</p>
+        <button class="btn btn-primary full" id="c-done" type="button">Done</button>
       </div>` : ''}
     </div>
   </div>
@@ -192,6 +206,7 @@ function openModal(s, tz) {
   // Reset the "book it for me" form + a fresh Turnstile token for each slot.
   if (CFG.scheduling && CFG.scheduling.enabled) {
     const rs = $('r-status'); if (rs) rs.textContent = '';
+    const bb = $('book-body'), cf = $('confirmed'); if (bb) bb.hidden = false; if (cf) cf.hidden = true;
     if (window.turnstile && CFG.scheduling.turnstileSiteKey) { try { window.turnstile.reset(); } catch(e){} }
   }
  } catch (err) { showErr('Could not open booking options: ' + (err && err.message ? err.message : err)); }
@@ -228,14 +243,20 @@ if (CFG.scheduling && CFG.scheduling.enabled) {
         }),
       });
       const data = await res.json().catch(()=>({}));
-      if (res.ok) { st.className='rstatus ok'; st.textContent='Booked — check your email for the invite.'; }
-      else {
+      if (res.ok) {
+        // Swap the modal to a confirmation screen.
+        $('c-when').textContent = $('mwhen').textContent;
+        $('c-email').textContent = email;
+        $('book-body').hidden = true;
+        $('confirmed').hidden = false;
+      } else {
         st.className='rstatus err'; st.textContent=(data && data.error) || 'Could not book. Try again.';
         if (window.turnstile) { try { window.turnstile.reset(); } catch(e){} }
       }
     } catch (e) { st.className='rstatus err'; st.textContent='Network error — please try again.'; }
     finally { sendBtn.disabled=false; }
   });
+  const done = $('c-done'); if (done) done.addEventListener('click', closeModal);
 }
 document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeModal(); });
 

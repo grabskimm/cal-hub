@@ -199,8 +199,8 @@ export default {
     );
   },
 
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const res = await routeRequest(request, env);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const res = await routeRequest(request, env, ctx);
     // HTTP semantics: a HEAD response carries headers but no body.
     if (request.method === 'HEAD') {
       return new Response(null, { status: res.status, headers: res.headers });
@@ -209,7 +209,7 @@ export default {
   },
 };
 
-async function routeRequest(request: Request, env: Env): Promise<Response> {
+async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   // Treat HEAD like GET for routing (clients probe feeds with HEAD).
@@ -355,7 +355,11 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
       const created = await createGraphEvent(
         env, token, buildGraphEvent(v.booking, { zoomLink: env.ZOOM_PERSONAL_LINK }),
       );
-      return created.ok ? jsonResponse({ ok: true }, 200) : jsonResponse({ error: created.error }, 502);
+      if (!created.ok) return jsonResponse({ error: created.error }, 502);
+      // Push a sync so the just-booked slot drops out of availability promptly
+      // (background — don't block the booker's confirmation on the merge run).
+      ctx.waitUntil(triggerMerge(env).catch(() => {}));
+      return jsonResponse({ ok: true }, 200);
     }
     return new Response('not found', { status: 404, headers: CORS });
   }

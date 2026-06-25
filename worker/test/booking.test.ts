@@ -74,6 +74,13 @@ describe('bookingHtml with scheduling enabled', () => {
     expect(html).toContain("'/book'");
   });
 
+  it('includes the post-booking confirmation screen', () => {
+    expect(html).toContain('id="confirmed"');
+    expect(html).toContain('id="c-email"');
+    expect(html).toContain('id="c-done"');
+    expect(html).toContain("You're booked!");
+  });
+
   it('hides the Zoom choice when no Zoom link is configured', () => {
     const noZoom = bookingHtml({
       owner: '', title: 'x', flavor: 'office', tz: 'UTC', durationMin: '30',
