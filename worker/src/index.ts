@@ -38,7 +38,8 @@ import {
 } from './chat';
 import { calendarHtml } from './calendar-view';
 import { type ChatPageCfg, chatPageHtml } from './chat-page';
-import { OWNER_BIO_DEFAULT } from './owner-bio';
+import { fetchOwnerProjects } from './github';
+import { OWNER_BIO_DEFAULT, OWNER_PROJECTS_FALLBACK } from './owner-bio';
 import { contactEnabled, contactHtml, sendContact, validateMessage } from './contact';
 import { EMBED_JS } from './embed';
 import {
@@ -118,6 +119,8 @@ export interface Env {
   CHAT_HOST?: string; // optional dedicated host (e.g. chat.example.com) that serves the chat at /
   OWNER_BIO?: string; // short bio used by the assistant-mode chat on CHAT_HOST to answer questions about the owner
   CHAT_DEBUG?: string; // "true" => include the underlying model error in the /chat JSON response (diagnostics)
+  GITHUB_USER?: string; // GitHub username; assistant-mode chat lists this user's own repos for accurate project answers
+  GITHUB_TOKEN?: string; // optional GitHub token to raise the API rate limit (a Worker secret)
 
   PUBLIC_PAGE_TITLE?: string; // friendly heading on the public availability page
   CALENDAR_FALLBACK_TZ?: string; // tz used if a viewer's local zone can't resolve
@@ -270,6 +273,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
           contactHref: contactAvailable(env) ? '/contact' : undefined,
           chat: chatEnabled(env) && schedulingEnabled(env)
             ? {
+                heading: name ? `Chat with ${name}` : 'Chat to book a time',
                 greeting: `Hi! Tell me roughly when you'd like to meet${name ? ` ${name}` : ''} — e.g. "30 minutes next week, afternoons" — and I'll find open times.`,
                 turnstileSiteKey: turnstileEnabled(env) ? (env.TURNSTILE_SITE_KEY ?? '') : '',
               }
@@ -645,7 +649,13 @@ async function handleChat(env: Env, ctx: ExecutionContext, payload: Record<strin
   const meetings = ['teams', ...(zoomEnabled(env) ? ['zoom'] : []), ...((env.BOOKING_PHONE ?? '').trim() ? ['phone'] : []), 'none'];
   const today = isoDate(Date.now());
   const bio = (env.OWNER_BIO ?? '').trim() || OWNER_BIO_DEFAULT;
-  const sys = systemPrompt({ todayIso: today, ownerName: (env.OWNER_NAME ?? 'me').trim() || 'me', tz, durationMin, proposed, meetings, mode, bio });
+  // Assistant mode answers about real projects: pull the owner's GitHub repos
+  // (cached), falling back to the curated list if the lookup is unavailable.
+  let projects = '';
+  if (mode === 'assistant') {
+    projects = (await fetchOwnerProjects(env, ctx).catch(() => '')) || OWNER_PROJECTS_FALLBACK;
+  }
+  const sys = systemPrompt({ todayIso: today, ownerName: (env.OWNER_NAME ?? 'me').trim() || 'me', tz, durationMin, proposed, meetings, mode, bio, projects });
 
   let action;
   try {

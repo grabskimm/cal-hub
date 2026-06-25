@@ -136,7 +136,21 @@
     // Leave empty to use the built-in default bio in src/owner-bio.ts (the full,
     // maintained persona). Set a value here (or via `wrangler secret put
     // OWNER_BIO`) only to override it without a code change.
-    "OWNER_BIO": ""
+    "OWNER_BIO": "",
+
+    // GitHub username whose OWN (non-fork) public repos the assistant-mode chat
+    // lists, so it answers about real projects. Empty disables the live lookup
+    // (the curated fallback in src/owner-bio.ts is used). For a higher API rate
+    // limit set GITHUB_TOKEN via `wrangler secret put GITHUB_TOKEN`.
+    "GITHUB_USER": "grabskimm",
+
+    // Chat model (Workers AI). Default in code is Llama 3.3 70B; this overrides
+    // it with Llama 4 Scout — a good compromise: newer, much cheaper/faster than
+    // 70B, 131k-token context (easily fits the bio + projects), with strong
+    // instruction-following + function calling. Alternatives to try:
+    //   @cf/mistralai/mistral-small-3.1-24b-instruct  (24B, 128k ctx, tool use)
+    //   @cf/meta/llama-3.3-70b-instruct-fp8-fast      (most capable, pricier)
+    "CHAT_MODEL": "@cf/meta/llama-4-scout-17b-16e-instruct"
   },
 
   "observability": { "enabled": true }

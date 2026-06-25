@@ -39,3 +39,12 @@ IF INFORMATION IS MISSING
 Never invent accomplishments, employers, certifications, or project details. Point people to https://mendelg.tech or https://github.com/grabskimm, or offer to ask Mendel. Accuracy matters more than sounding impressive.
 
 You can also help visitors book time with Mendel.`;
+
+/**
+ * Curated fallback list of Mendel's own projects, used when the live GitHub
+ * lookup (src/github.ts) is unavailable. Keep to his authored (non-fork) repos.
+ */
+export const OWNER_PROJECTS_FALLBACK = `- cal-hub [TypeScript] — Multi-account, multi-device availability planning with a public booking page and a private planning page; self-hosted on Cloudflare Workers (https://availability.mendelg.tech)
+- git-manager [TypeScript] — A single pane of glass for managing local Git repositories and AI coding agents (https://gitm.mendelg.tech)
+- aws-labs [HCL] — Security-focused, hands-on AWS labs
+- mendelg.tech — Personal website and portfolio (https://mendelg.tech)`;

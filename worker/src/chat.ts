@@ -120,19 +120,22 @@ export type ChatMode = 'schedule' | 'assistant';
 /** System prompt: the model's whole job is to emit one JSON ChatAction. */
 export function systemPrompt(opts: {
   todayIso: string; ownerName: string; tz: string; durationMin: number;
-  proposed?: Slot[]; meetings: string[]; mode?: ChatMode; bio?: string;
+  proposed?: Slot[]; meetings: string[]; mode?: ChatMode; bio?: string; projects?: string;
 }): string {
   const proposedList = (opts.proposed ?? [])
     .map((s, i) => `${i + 1}. ${new Date(s.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: opts.tz })}`)
     .join('\n');
   const persona = opts.mode === 'assistant'
     ? [
-        `You are ${opts.ownerName}'s friendly personal assistant. You can (a) answer questions about ${opts.ownerName} using the ABOUT section below, and (b) help visitors book time with ${opts.ownerName}.`,
+        `You are ${opts.ownerName}'s friendly personal assistant. You can (a) answer questions about ${opts.ownerName} using the ABOUT and PROJECTS sections below, and (b) help visitors book time with ${opts.ownerName}.`,
         opts.bio?.trim()
           ? `ABOUT ${opts.ownerName}:\n${opts.bio.trim()}`
           : `You have no detailed bio for ${opts.ownerName}; if asked something you don't know, say so briefly and offer to help schedule.`,
-        `Only use the ABOUT section for facts about ${opts.ownerName} — never invent biographical details.`,
-      ]
+        opts.projects?.trim()
+          ? `${opts.ownerName}'S PROJECTS (his own GitHub repos — use these for any project questions):\n${opts.projects.trim()}`
+          : '',
+        `Only use the ABOUT and PROJECTS sections for facts about ${opts.ownerName} — never invent biographical or project details. If asked about something not covered, say so and point to https://mendelg.tech or https://github.com/grabskimm.`,
+      ].filter(Boolean)
     : [`You are a friendly scheduling assistant for ${opts.ownerName}. Keep the focus on finding and booking a time.`];
   return [
     ...persona,

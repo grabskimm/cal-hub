@@ -131,7 +131,7 @@ describe('systemPrompt', () => {
     expect(p).toContain('personal assistant');
     expect(p).toContain('ABOUT Mendel:');
     expect(p).toContain('Mendel builds things.');
-    expect(p).toContain('never invent biographical details');
+    expect(p).toContain('never invent biographical or project details');
   });
 
   it('assistant mode without a bio falls back gracefully', () => {

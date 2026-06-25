@@ -10,7 +10,7 @@ export interface AvailabilityPageCfg {
   fallbackTz: string; // used if the browser can't resolve a local zone
   footer?: string; // optional footer HTML (copyright/link)
   contactHref?: string; // when set, shows a "Contact" link in the top nav
-  chat?: { greeting: string; turnstileSiteKey: string }; // when set, embeds the chat booker inline
+  chat?: { heading: string; greeting: string; turnstileSiteKey: string }; // when set, embeds the chat booker as a pop-up
 }
 
 // Light/dark theming, shared across every page. THEME_HEAD goes first in <head>
@@ -403,6 +403,60 @@ function initChatWidget(opts) {
 }
 `;
 
+// ---- Floating chat launcher (a FAB that opens a docked sidebar popup) --------
+// Used to embed the chat as a bottom-right pop-up sidebar instead of inline. The
+// inner chatbox is the same shared widget; this only adds the launcher + panel
+// chrome and a small open/close toggle.
+export const CHAT_FAB_CSS = `
+  .chat-fab { position:fixed; right:1.1rem; bottom:1.1rem; z-index:60; border:0; cursor:pointer;
+    display:inline-flex; align-items:center; gap:.5rem; font:inherit; font-weight:700; color:#fff;
+    padding:.8rem 1.15rem; border-radius:99px; background:linear-gradient(135deg,var(--brand),var(--brand2));
+    box-shadow:0 10px 28px rgba(99,102,241,.45); transition:filter .15s, transform .08s; }
+  .chat-fab:hover { filter:brightness(1.06); } .chat-fab:active { transform:translateY(1px); }
+  .chat-fab .ico { font-size:1.15rem; line-height:1; }
+  .chat-popup { position:fixed; right:1.1rem; bottom:1.1rem; z-index:61; width:380px; max-width:calc(100vw - 2rem);
+    height:min(560px, calc(100vh - 2rem)); height:min(560px, calc(100dvh - 2rem));
+    display:flex; flex-direction:column; background:var(--card); border:1px solid var(--line); border-radius:18px;
+    box-shadow:0 24px 70px rgba(2,6,23,.4); overflow:hidden; animation:pop .18s ease; }
+  .chat-popup[hidden] { display:none; }
+  .chat-popup-head { display:flex; align-items:center; justify-content:space-between; gap:.5rem;
+    padding:.8rem 1rem; color:#fff; font-weight:700; font-size:.95rem;
+    background:linear-gradient(135deg,var(--brand),var(--brand2)); }
+  .chat-popup-x { border:0; background:transparent; color:#fff; font-size:1.45rem; line-height:1; cursor:pointer; padding:.1rem .35rem; opacity:.9; }
+  .chat-popup-x:hover { opacity:1; }
+  .chat-popup .chatbox { flex:1; min-height:0; padding:1rem 1.1rem; overflow:hidden; }
+  .chat-popup .chat-thread { flex:1; min-height:0; max-height:none; }
+  @media (max-width:620px){
+    .chat-fab { right:.9rem; bottom:.9rem; }
+    .chat-popup { right:0; left:0; bottom:0; width:auto; max-width:none; height:86vh; height:86dvh; border-radius:18px 18px 0 0; }
+  }
+`;
+
+/** Wrap the inner chat widget markup in a FAB + docked popup. */
+export function chatFabMarkup(innerMarkup: string, label: string): string {
+  return `<button class="chat-fab" id="chatFab" type="button" aria-label="Open chat"><span class="ico">💬</span> Chat</button>
+  <div class="chat-popup" id="chatPopup" role="dialog" aria-label="${escapeHtml(label)}" hidden>
+    <div class="chat-popup-head"><span>${escapeHtml(label)}</span>
+      <button class="chat-popup-x" id="chatPopupX" type="button" aria-label="Close chat">×</button></div>
+    <div class="chatbox">
+      ${innerMarkup}
+    </div>
+  </div>`;
+}
+
+// Toggle for the FAB/popup. The widget itself is wired separately (initChatWidget).
+export const CHAT_FAB_JS = `
+(function(){
+  var fab=document.getElementById('chatFab'), pop=document.getElementById('chatPopup'), x=document.getElementById('chatPopupX');
+  if(!fab||!pop) return;
+  function open(){ pop.hidden=false; fab.style.display='none'; var i=pop.querySelector('.chat-input'); if(i) try{ i.focus(); }catch(e){} }
+  function close(){ pop.hidden=true; fab.style.display=''; }
+  fab.addEventListener('click', open);
+  if(x) x.addEventListener('click', close);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape' && !pop.hidden) close(); });
+})();
+`;
+
 export function availabilityHtml(cfg: AvailabilityPageCfg): string {
   const cfgJson = JSON.stringify(cfg);
   return `<!doctype html>
@@ -412,7 +466,7 @@ export function availabilityHtml(cfg: AvailabilityPageCfg): string {
 ${THEME_HEAD}
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(cfg.title)}</title>
-<style>${SHARED_CSS}${cfg.chat ? CHAT_WIDGET_CSS : ''}</style>
+<style>${SHARED_CSS}${cfg.chat ? CHAT_WIDGET_CSS + CHAT_FAB_CSS : ''}</style>
 ${cfg.chat && cfg.chat.turnstileSiteKey ? TURNSTILE_HEAD : ''}
 </head>
 <body>
@@ -444,12 +498,9 @@ ${cfg.chat && cfg.chat.turnstileSiteKey ? TURNSTILE_HEAD : ''}
       </div>
     </div>
     <div id="status"></div>
-    ${cfg.chat ? `<div class="panel chatbox" style="margin-top:1.1rem;">
-      <h2 class="chatbox-title">💬 Or just ask</h2>
-      ${chatWidgetMarkup(cfg.chat.turnstileSiteKey)}
-    </div>` : ''}
     ${cfg.footer ?? ''}
   </div>
+  ${cfg.chat ? chatFabMarkup(chatWidgetMarkup(cfg.chat.turnstileSiteKey), cfg.chat.heading) : ''}
 
 <script>
 ${THEME_JS}
@@ -481,7 +532,7 @@ async function load() {
 }
 tzSel.addEventListener('change', ()=>picker.refresh());
 load();
-${cfg.chat ? `${CHAT_WIDGET_JS}
+${cfg.chat ? `${CHAT_WIDGET_JS}${CHAT_FAB_JS}
 initChatWidget({ root: document.querySelector('.chatbox'), greeting: CFG.chat.greeting, turnstile: ${cfg.chat.turnstileSiteKey ? 'true' : 'false'} });` : ''}
 </script>
 </body>

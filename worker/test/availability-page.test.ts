@@ -40,16 +40,19 @@ describe('availabilityHtml', () => {
   });
 
   it('does not embed a chat widget unless chat config is provided', () => {
-    expect(html).not.toContain('class="panel chatbox"');
+    expect(html).not.toContain('chat-fab');
     expect(html).not.toContain('initChatWidget(');
   });
 
-  it('embeds the chat widget inline when chat config is given', () => {
+  it('embeds the chat as a floating pop-up (not inline below the calendar) when configured', () => {
     const withChat = availabilityHtml({
       title: 'Find a time with Mendel', fallbackTz: 'UTC',
-      chat: { greeting: 'Hi! When works?', turnstileSiteKey: '0xSITEKEY' },
+      chat: { heading: 'Chat with Mendel', greeting: 'Hi! When works?', turnstileSiteKey: '0xSITEKEY' },
     });
-    expect(withChat).toContain('class="panel chatbox"');
+    // Floating launcher + docked popup, not an inline panel.
+    expect(withChat).toContain('class="chat-fab"');
+    expect(withChat).toContain('id="chatPopup"');
+    expect(withChat).toContain('Chat with Mendel');
     expect(withChat).toContain('class="chat-thread"');
     expect(withChat).toContain('initChatWidget(');
     expect(withChat).toContain('Hi! When works?');
