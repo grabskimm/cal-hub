@@ -30,17 +30,21 @@ export const SHARED_CSS = `
     --brand:#6366f1; --brand2:#8b5cf6; --accent:#22d3ee;
     --chip:#eef2ff; --chipink:#4338ca; --ok:#10b981; --line:#eceef3;
     --ring:rgba(99,102,241,.35); --shadow:0 14px 40px rgba(15,23,42,.10);
+    --hero-grad: linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#22d3ee 140%);
     --radius:16px;
   }
-  /* Dark theme: set via data-theme on <html> (an early inline script applies the
-     saved choice or the OS default before paint; a toggle flips it). */
+  /* Dark theme: a cohesive deep-purple palette that aligns with the brand hero
+     (the hero gradient is muted in dark via --hero-grad so it doesn't blast a
+     bright purple slab against the dark body). Applied via data-theme on <html>
+     by an early inline script (no flash); a toggle flips it. */
   :root[data-theme="dark"] {
-    --bg:#0b1020; --glow:rgba(99,102,241,.12); --card:#141b2e; --card2:#111728; --field:#1b2236;
-    --hover:#1f2740; --off:#46506e; --chipborder:#2a3354;
-    --ink:#e7e9f0; --muted:#98a2b6;
-    --brand:#818cf8; --brand2:#a78bfa; --accent:#22d3ee;
-    --chip:#1e2747; --chipink:#c7d2fe; --ok:#34d399; --line:#28304b;
-    --ring:rgba(129,140,248,.4); --shadow:0 18px 50px rgba(0,0,0,.55);
+    --bg:#0c0a18; --glow:rgba(124,108,255,.14); --card:#17132b; --card2:#120f24; --field:#1e1838;
+    --hover:#241d40; --off:#4a4470; --chipborder:#312a52;
+    --ink:#e9e7f3; --muted:#a09ab8;
+    --brand:#8b8cf8; --brand2:#a78bfa; --accent:#22d3ee;
+    --chip:#241c47; --chipink:#cdc7fb; --ok:#34d399; --line:#2c2747;
+    --ring:rgba(139,140,248,.4); --shadow:0 18px 50px rgba(0,0,0,.6);
+    --hero-grad: linear-gradient(135deg,#2a2363 0%,#3a2a63 55%,#163a52 140%);
   }
   * { box-sizing:border-box; }
   /* Reserve the scrollbar gutter on BOTH sides so a page with a vertical
@@ -55,7 +59,7 @@ export const SHARED_CSS = `
     line-height:1.5; -webkit-font-smoothing:antialiased; }
   .wrap { max-width: 860px; margin:0 auto; padding: 0 1.1rem 4rem; }
   header.hero { text-align:center; padding: 1rem 1.1rem 4.4rem; color:#fff;
-    background: linear-gradient(135deg, var(--brand) 0%, var(--brand2) 55%, var(--accent) 140%);
+    background: var(--hero-grad);
     position:relative; overflow:hidden; }
   /* top navigation strip inside the hero (home / contact) — not overlapping the title */
   .topnav { display:flex; align-items:center; gap:.5rem; max-width:860px; margin:0 auto 1.5rem;
@@ -132,7 +136,7 @@ export const SHARED_CSS = `
   .calhead button:hover { background:var(--hover); }
   /* minmax(0,1fr) (not 1fr) so the aspect-ratio cells can shrink — otherwise the
      7th column (Saturday) overflows the card and gets clipped. */
-  .cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.28rem; }
+  .cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.4rem; }
   .cal-dow { text-align:center; font-size:.64rem; font-weight:800; letter-spacing:.04em; color:var(--muted); padding:.2rem 0; }
   /* Flatter than square so the month grid stays compact (square cells made the
      calendar much taller than the times column, leaving an uneven panel gap).
@@ -146,7 +150,7 @@ export const SHARED_CSS = `
      doesn't bleed onto adjacent dates (was overlapping, esp. in the embed iframe). */
   .cal-cell.has:hover { background:var(--brand); color:#fff; z-index:1; }
   .cal-cell.has:active { transform:translateY(1px); }
-  .cal-cell.sel { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; box-shadow:0 2px 7px rgba(99,102,241,.3); z-index:2; }
+  .cal-cell.sel { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; z-index:2; }
   .cal-cell.today:not(.sel) { box-shadow:inset 0 0 0 2px var(--accent); }
   /* times: a clean VERTICAL list inside the times card; slides in when shown */
   .times { display:flex; flex-direction:column; gap:.5rem; animation:slidein .28s ease; }
