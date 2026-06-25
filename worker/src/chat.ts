@@ -81,9 +81,12 @@ export function rankSlots(
 }
 
 /** Extract the first JSON object from the model's text and validate it (pure). */
-export function parseAction(text: string): ChatAction {
+export function parseAction(text: unknown): ChatAction {
   let obj: Record<string, unknown> = {};
-  const m = text.match(/\{[\s\S]*\}/);
+  // The model output should be a string, but the AI binding can hand back a
+  // non-string (e.g. an already-parsed object); coerce so .match never throws.
+  const s = typeof text === 'string' ? text : text == null ? '' : JSON.stringify(text);
+  const m = s.match(/\{[\s\S]*\}/);
   if (m) {
     try { obj = JSON.parse(m[0]) as Record<string, unknown>; } catch { obj = {}; }
   }
@@ -151,7 +154,11 @@ export async function callModel(env: ChatEnv, system: string, history: ChatMessa
     max_tokens: 400,
     temperature: 0.2,
   });
-  return typeof res === 'string' ? res : (res.response ?? '');
+  if (typeof res === 'string') return res;
+  const r = (res as { response?: unknown })?.response;
+  // Most models return { response: "..." }, but some return a structured value;
+  // stringify so parseAction can still recover the JSON action from it.
+  return typeof r === 'string' ? r : r == null ? '' : JSON.stringify(r);
 }
 
 /** Build the SlotParams for the chat's deterministic slot search (mirrors /slots.json). */

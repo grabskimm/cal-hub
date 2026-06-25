@@ -10,6 +10,7 @@ export interface AvailabilityPageCfg {
   fallbackTz: string; // used if the browser can't resolve a local zone
   footer?: string; // optional footer HTML (copyright/link)
   contactHref?: string; // when set, shows a "Contact" link in the top nav
+  chatHref?: string; // when set, shows a "Chat" link in the top nav (chat booker)
 }
 
 // Light/dark theming, shared across every page. THEME_HEAD goes first in <head>
@@ -330,6 +331,7 @@ ${THEME_HEAD}
     <nav class="topnav">
       <a href="/">⌂ Home</a>
       <span class="spacer"></span>
+      ${cfg.chatHref ? `<a href="${escapeHtml(cfg.chatHref)}">💬 Chat</a>` : ''}
       ${cfg.contactHref ? `<a href="${escapeHtml(cfg.contactHref)}">✉ Contact</a>` : ''}
       ${THEME_BTN}
     </nav>

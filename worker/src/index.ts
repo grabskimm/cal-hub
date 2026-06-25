@@ -267,6 +267,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
           fallbackTz: env.CALENDAR_FALLBACK_TZ ?? 'America/Los_Angeles',
           footer: buildFooter(env),
           contactHref: contactAvailable(env) ? '/contact' : undefined,
+          chatHref: chatEnabled(env) && schedulingEnabled(env) ? '/chat' : undefined,
         });
         return new Response(html, {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
