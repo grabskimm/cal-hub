@@ -63,7 +63,7 @@ describe('bookingHtml with scheduling enabled', () => {
     owner: 'me@corp.com', title: 'Intro call', flavor: 'office',
     tz: 'America/New_York', durationMin: '30', heading: 'Book with Mendel',
     fallbackTz: 'America/Los_Angeles', slotsBase: '',
-    scheduling: { enabled: true, zoom: true, turnstileSiteKey: '0xSITEKEY' },
+    scheduling: { enabled: true, zoom: true, phone: '+1 555 0100', turnstileSiteKey: '0xSITEKEY' },
   });
 
   it('renders the request form, meeting choices, and Turnstile widget', () => {
@@ -76,6 +76,14 @@ describe('bookingHtml with scheduling enabled', () => {
     expect(html).toContain("'/book'");
   });
 
+  it('defaults to Teams, puts No-link last, and offers Phone with the owner number', () => {
+    expect(html).toContain('value="teams" checked');
+    expect(html).toContain('id="r-phone"');
+    expect(html).toContain('+1 555 0100');
+    // No-link radio comes after the phone option in the markup.
+    expect(html.indexOf('value="phone"')).toBeLessThan(html.indexOf('value="none"'));
+  });
+
   it('includes the post-booking confirmation screen', () => {
     expect(html).toContain('id="confirmed"');
     expect(html).toContain('id="c-email"');
@@ -86,11 +94,12 @@ describe('bookingHtml with scheduling enabled', () => {
   it('hides the Zoom choice when no Zoom link is configured', () => {
     const noZoom = bookingHtml({
       owner: '', title: 'x', flavor: 'office', tz: 'UTC', durationMin: '30',
-      heading: 'h', slotsBase: '', scheduling: { enabled: true, zoom: false, turnstileSiteKey: '' },
+      heading: 'h', slotsBase: '', scheduling: { enabled: true, zoom: false, phone: '', turnstileSiteKey: '' },
     });
     expect(noZoom).toContain('id="req"');
     expect(noZoom).toContain('value="teams"');
     expect(noZoom).not.toContain('value="zoom"');
+    expect(noZoom).not.toContain('value="phone"'); // no phone option without a number
     expect(noZoom).not.toContain('data-sitekey'); // no widget without a site key
   });
 });

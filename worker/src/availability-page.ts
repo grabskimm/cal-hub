@@ -27,7 +27,7 @@ export const SHARED_CSS = `
       radial-gradient(1200px 500px at 50% -200px, #eef2ff 0%, rgba(238,242,255,0) 60%), var(--bg);
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, sans-serif;
     line-height:1.5; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width: 920px; margin:0 auto; padding: 0 1.1rem 4rem; }
+  .wrap { max-width: 860px; margin:0 auto; padding: 0 1.1rem 4rem; }
   header.hero { text-align:center; padding: 1rem 1rem 4.4rem; color:#fff;
     background: linear-gradient(135deg, var(--brand) 0%, var(--brand2) 55%, var(--accent) 140%);
     position:relative; overflow:hidden; }
@@ -84,7 +84,7 @@ export const SHARED_CSS = `
   /* Two distinct cards side by side. The CALENDAR is the primary card and grows
      to fill the row so all seven weekday columns are roomy; the times list is a
      narrower, fixed column beside it (about half the calendar's width). */
-  .booklayout { display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap; margin-top:1.1rem; }
+  .booklayout { display:flex; gap:1rem; align-items:flex-start; justify-content:center; flex-wrap:wrap; margin-top:1.1rem; }
   .card { border:1px solid var(--line); border-radius:13px; padding:1rem 1.05rem; background:#fcfdff; }
   .calcard { flex:1 1 24rem; min-width:19rem; max-width:36rem; }
   .timecard { flex:0 0 13rem; width:13rem; min-width:0; display:flex; flex-direction:column; }
@@ -104,7 +104,10 @@ export const SHARED_CSS = `
      7th column (Saturday) overflows the card and gets clipped. */
   .cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.28rem; }
   .cal-dow { text-align:center; font-size:.64rem; font-weight:800; letter-spacing:.04em; color:var(--muted); padding:.2rem 0; }
-  .cal-cell { aspect-ratio:1; border:0; border-radius:11px; background:transparent; font:inherit; font-weight:700;
+  /* Flatter than square so the month grid stays compact (square cells made the
+     calendar much taller than the times column, leaving an uneven panel gap).
+     min-height keeps cells tappable on narrow widths where the ratio is short. */
+  .cal-cell { aspect-ratio:1.5; min-height:2.4rem; border:0; border-radius:11px; background:transparent; font:inherit; font-weight:700;
     color:var(--ink); display:flex; align-items:center; justify-content:center; cursor:default; transition:transform .08s, background .15s, color .15s; }
   .cal-cell.empty { background:none; }
   .cal-cell.off { color:#c4c8d4; }
@@ -135,7 +138,8 @@ export const SHARED_CSS = `
     .field.tzfield, .field.tzfield select { width:100%; }
     .grow { flex-basis:100%; }
     a.book { margin-left:0; width:100%; justify-content:center; }
-    .sheet { border-radius:16px 16px 0 0; align-self:flex-end; }
+    .sheet { border-radius:16px 16px 0 0; align-self:flex-end; max-width:none;
+      max-height:90vh; max-height:90dvh; }
     .modal { align-items:flex-end; padding:0; }
   }
   /* modal */
@@ -143,8 +147,16 @@ export const SHARED_CSS = `
     justify-content:center; padding:1rem; z-index:50; animation:fade .15s ease; }
   .modal[hidden]{ display:none; }
   .sheet { background:#fff; border-radius:20px; max-width:24rem; width:100%; padding:1.6rem 1.5rem 1.4rem;
-    box-shadow:0 30px 80px rgba(2,6,23,.35); position:relative; animation:pop .18s ease; text-align:center; }
-  .sheet .x { position:absolute; top:.6rem; right:.7rem; border:0; background:transparent; font-size:1.4rem;
+    box-shadow:0 30px 80px rgba(2,6,23,.35); position:relative; animation:pop .18s ease; text-align:center;
+    display:flex; flex-direction:column; overflow:hidden;
+    max-height:calc(100vh - 2rem); max-height:calc(100dvh - 2rem); }
+  /* the content scrolls inside the sheet (so a tall form is reachable on mobile),
+     while the close button stays pinned; overscroll-contain stops the page behind
+     from scrolling instead. */
+  .sheet-scroll { overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+  body.modal-open { overflow:hidden; }
+  .sheet .x { position:absolute; top:.6rem; right:.7rem; border:0; background:rgba(255,255,255,.85);
+    border-radius:50%; width:1.8rem; height:1.8rem; font-size:1.3rem; z-index:3;
     color:var(--muted); cursor:pointer; line-height:1; }
   .sheet .x:hover { color:var(--ink); }
   .mhead { width:3.1rem; height:3.1rem; margin:.1rem auto .6rem; display:flex; align-items:center; justify-content:center;

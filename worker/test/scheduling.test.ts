@@ -71,6 +71,26 @@ describe('buildGraphEvent', () => {
     expect(ev.location.displayName).toBe('Zoom');
     expect(ev.body.content).toContain('https://zoom.us/j/9');
   });
+  it('phone sets a Phone location with owner + attendee numbers', () => {
+    const ev = buildGraphEvent({ ...base, meeting: 'phone', phone: '+1 555 9999' }, { ownerPhone: '+1 555 0000' }) as any;
+    expect(ev.isOnlineMeeting).toBeUndefined();
+    expect(ev.location.displayName).toBe('Phone call');
+    expect(ev.body.content).toContain('+1 555 0000');
+    expect(ev.body.content).toContain('+1 555 9999');
+  });
+});
+
+describe('validateBooking phone', () => {
+  const opts = { defaultSubject: 'Meeting', zoomAvailable: false, phoneAvailable: true, nowMs: NOW };
+  it('keeps phone + number when available', () => {
+    const r = validateBooking({ start: future(2), end: future(2.5), email: 'a@b.com', meeting: 'phone', phone: '+1 555 1234' }, opts);
+    expect(r.ok && r.booking.meeting).toBe('phone');
+    expect(r.ok && r.booking.phone).toBe('+1 555 1234');
+  });
+  it('downgrades phone to none when unavailable', () => {
+    const r = validateBooking({ start: future(2), end: future(2.5), email: 'a@b.com', meeting: 'phone' }, { ...opts, phoneAvailable: false });
+    expect(r.ok && r.booking.meeting).toBe('none');
+  });
 });
 
 describe('slotIsBookable', () => {

@@ -25,6 +25,7 @@ export interface BookingPageCfg {
   scheduling?: {
     enabled: boolean;
     zoom: boolean; // offer the Zoom option (a personal link is configured)
+    phone: string; // owner's phone for the "Phone" option ('' = option hidden)
     turnstileSiteKey: string; // '' disables the Turnstile widget
   };
 }
@@ -43,7 +44,8 @@ export function bookingHtml(cfg: BookingPageCfg): string {
   .req h4 { margin:0 0 .2rem; font-size:.95rem; }
   .req .rsub { margin:0 0 .7rem; color:var(--muted); font-size:.82rem; }
   .req label { display:block; font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:.5rem 0 .2rem; }
-  .req input[type=text], .req input[type=email] { width:100%; padding:.6rem .7rem; font:inherit; color:var(--ink); border:1px solid var(--line); border-radius:10px; }
+  .req input[type=text], .req input[type=email], .req input[type=tel] { width:100%; padding:.6rem .7rem; font:inherit; color:var(--ink); border:1px solid var(--line); border-radius:10px; }
+  .req .rphone-note { font-size:.78rem; color:var(--muted); margin:.4rem 0 0; text-align:left; }
   .req input:focus { outline:none; border-color:var(--brand); }
   .req .mtg { display:flex; gap:.8rem; flex-wrap:wrap; margin-top:.3rem; }
   .req .mtg label { display:inline-flex; align-items:center; gap:.35rem; text-transform:none; letter-spacing:0; font-weight:500; font-size:.85rem; color:var(--ink); margin:0; }
@@ -94,6 +96,7 @@ ${cfg.scheduling?.enabled && cfg.scheduling.turnstileSiteKey
   <div id="modal" class="modal" hidden>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mtitle">
       <button class="x" id="x" aria-label="Close">×</button>
+      <div class="sheet-scroll">
       <div id="book-body">
       <div class="mhead" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/><path d="m9 14 2 2 4-4"/></svg>
@@ -115,10 +118,17 @@ ${cfg.scheduling?.enabled && cfg.scheduling.turnstileSiteKey
         <input type="text" id="r-name" autocomplete="name" />
         <label>Meeting</label>
         <div class="mtg">
-          <label><input type="radio" name="mtg" value="none" checked /> No link</label>
-          <label><input type="radio" name="mtg" value="teams" /> Teams</label>
+          <label><input type="radio" name="mtg" value="teams" checked /> Teams</label>
           ${cfg.scheduling.zoom ? '<label><input type="radio" name="mtg" value="zoom" /> Zoom</label>' : ''}
+          ${cfg.scheduling.phone ? '<label><input type="radio" name="mtg" value="phone" /> Phone</label>' : ''}
+          <label><input type="radio" name="mtg" value="none" /> No link</label>
         </div>
+        ${cfg.scheduling.phone ? `
+        <div id="r-phone-wrap" hidden>
+          <label for="r-phone">Your phone (optional)</label>
+          <input type="tel" id="r-phone" autocomplete="tel" placeholder="+1 555 123 4567" />
+          <p class="rphone-note">I'll call you at the number you give, or reach me at <b>${escapeHtml(cfg.scheduling.phone)}</b>.</p>
+        </div>` : ''}
         <input class="hp" type="text" id="r-company" tabindex="-1" autocomplete="off" aria-hidden="true" />
         ${cfg.scheduling.turnstileSiteKey
           ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(cfg.scheduling.turnstileSiteKey)}"></div>`
@@ -137,6 +147,7 @@ ${cfg.scheduling?.enabled && cfg.scheduling.turnstileSiteKey
         <p class="msub">We emailed an invite to <b id="c-email"></b>.</p>
         <button class="btn btn-primary full" id="c-done" type="button">Done</button>
       </div>` : ''}
+      </div>
     </div>
   </div>
 
@@ -213,22 +224,31 @@ function openModal(s, tz) {
   // CSS, which is the kind of thing that can silently no-op in some setups.
   modal.hidden = false;
   modal.style.display = 'flex';
+  document.body.classList.add('modal-open'); // lock background scroll (mobile)
+  const sc = modal.querySelector('.sheet-scroll'); if (sc) sc.scrollTop = 0;
   statusEl.textContent = '';
   // Reset the "book it for me" form + a fresh Turnstile token for each slot.
   if (CFG.scheduling && CFG.scheduling.enabled) {
     const rs = $('r-status'); if (rs) rs.textContent = '';
     const bb = $('book-body'), cf = $('confirmed'); if (bb) bb.hidden = false; if (cf) cf.hidden = true;
+    const pw = $('r-phone-wrap'); if (pw) pw.hidden = true; // default meeting is Teams
     if (window.turnstile && CFG.scheduling.turnstileSiteKey) { try { window.turnstile.reset(); } catch(e){} }
   }
  } catch (err) { showErr('Could not open booking options: ' + (err && err.message ? err.message : err)); }
 }
-function closeModal(){ modal.hidden = true; modal.style.display = 'none'; }
+function closeModal(){ modal.hidden = true; modal.style.display = 'none'; document.body.classList.remove('modal-open'); }
 $('x').addEventListener('click', closeModal);
 modal.addEventListener('click', (e)=>{ if (e.target===modal) closeModal(); });
 
 // "Book it for me" → POST /book (the server creates the event + emails the invite).
 if (CFG.scheduling && CFG.scheduling.enabled) {
   const sendBtn = $('r-send');
+  // Reveal the booker's phone field only when "Phone" is chosen.
+  const phoneWrap = $('r-phone-wrap');
+  document.querySelectorAll('input[name=mtg]').forEach((r)=> r.addEventListener('change', ()=>{
+    const m = document.querySelector('input[name=mtg]:checked');
+    if (phoneWrap) phoneWrap.hidden = !(m && m.value === 'phone');
+  }));
   sendBtn.addEventListener('click', async ()=>{
     const st = $('r-status');
     if (!currentSlot) { st.className='rstatus err'; st.textContent='Pick a time first.'; return; }
@@ -250,7 +270,8 @@ if (CFG.scheduling && CFG.scheduling.enabled) {
           start: currentSlot.start, end: currentSlot.end, email,
           name: ($('r-name').value||'').trim(),
           subject: (($('m-subject') && $('m-subject').value.trim()) || titleEl.value || CFG.title || 'Meeting'),
-          meeting, company: ($('r-company').value||''), turnstile,
+          meeting, phone: ($('r-phone') ? $('r-phone').value.trim() : ''),
+          company: ($('r-company').value||''), turnstile,
         }),
       });
       const data = await res.json().catch(()=>({}));

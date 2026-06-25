@@ -93,6 +93,7 @@ export interface Env {
   MS_CLIENT_SECRET?: string; // app client secret (a Worker secret)
   MS_MAILBOX?: string; // mailbox to write to (UPN / primary SMTP)
   ZOOM_PERSONAL_LINK?: string; // optional static Zoom URL for the "Zoom" choice
+  BOOKING_PHONE?: string; // owner's phone shown for the "Phone" choice (enables it)
   TURNSTILE_SITE_KEY?: string; // Cloudflare Turnstile public site key (page widget)
   TURNSTILE_SECRET?: string; // Turnstile secret (server verify; a Worker secret)
   BOOKING_NOTIFY_TO?: string; // owner alert recipient on each booking (defaults to CONTACT_TO / owner)
@@ -281,6 +282,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
           scheduling: {
             enabled: schedulingEnabled(env),
             zoom: zoomEnabled(env),
+            phone: (env.BOOKING_PHONE ?? '').trim(),
             turnstileSiteKey: turnstileEnabled(env) ? (env.TURNSTILE_SITE_KEY ?? '') : '',
           },
         };
@@ -329,6 +331,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       const v = validateBooking(payload, {
         defaultSubject: env.BOOKING_TITLE ?? 'Meeting',
         zoomAvailable: zoomEnabled(env),
+        phoneAvailable: Boolean((env.BOOKING_PHONE ?? '').trim()),
         nowMs: Date.now(),
       });
       if (!v.ok) return jsonResponse({ error: v.error }, 400);
@@ -356,7 +359,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       const token = await graphToken(env);
       if (!token) return jsonResponse({ error: 'Calendar authorization failed.' }, 502);
       const created = await createGraphEvent(
-        env, token, buildGraphEvent(v.booking, { zoomLink: env.ZOOM_PERSONAL_LINK }),
+        env, token, buildGraphEvent(v.booking, { zoomLink: env.ZOOM_PERSONAL_LINK, ownerPhone: env.BOOKING_PHONE }),
       );
       if (!created.ok) return jsonResponse({ error: created.error }, 502);
       // Push a sync so the just-booked slot drops out of availability promptly,
