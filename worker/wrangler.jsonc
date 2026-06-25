@@ -26,6 +26,11 @@
   // R2 bucket for /raw and /merged objects (create it first; see infra/cloudflare).
   "r2_buckets": [{ "binding": "AVAILCAL_BUCKET", "bucket_name": "availcal" }],
 
+  // Workers AI — powers the natural-language chat booker (/chat). Billed as usage
+  // on the account (free daily allowance). The chat feature stays disabled until
+  // this binding + CHAT_ENABLED are present.
+  "ai": { "binding": "AI" },
+
   // Hourly merge.
   "triggers": { "crons": ["0 * * * *"] },
 
