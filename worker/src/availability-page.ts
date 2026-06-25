@@ -107,14 +107,16 @@ export const SHARED_CSS = `
   /* Flatter than square so the month grid stays compact (square cells made the
      calendar much taller than the times column, leaving an uneven panel gap).
      min-height keeps cells tappable on narrow widths where the ratio is short. */
-  .cal-cell { aspect-ratio:1.5; min-height:2.4rem; border:0; border-radius:11px; background:transparent; font:inherit; font-weight:700;
+  .cal-cell { position:relative; aspect-ratio:1.5; min-height:2.4rem; border:0; border-radius:11px; background:transparent; font:inherit; font-weight:700;
     color:var(--ink); display:flex; align-items:center; justify-content:center; cursor:default; transition:transform .08s, background .15s, color .15s; }
   .cal-cell.empty { background:none; }
   .cal-cell.off { color:#c4c8d4; }
   .cal-cell.has { cursor:pointer; background:var(--chip); color:var(--chipink); }
-  .cal-cell.has:hover { background:var(--brand); color:#fff; }
+  /* z-index so the active cell sits above neighbours; tight shadow so the glow
+     doesn't bleed onto adjacent dates (was overlapping, esp. in the embed iframe). */
+  .cal-cell.has:hover { background:var(--brand); color:#fff; z-index:1; }
   .cal-cell.has:active { transform:translateY(1px); }
-  .cal-cell.sel { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; box-shadow:0 6px 16px rgba(99,102,241,.4); }
+  .cal-cell.sel { background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; box-shadow:0 2px 7px rgba(99,102,241,.3); z-index:2; }
   .cal-cell.today:not(.sel) { box-shadow:inset 0 0 0 2px var(--accent); }
   /* times: a clean VERTICAL list inside the times card; slides in when shown */
   .times { display:flex; flex-direction:column; gap:.5rem; animation:slidein .28s ease; }
@@ -322,7 +324,6 @@ export function availabilityHtml(cfg: AvailabilityPageCfg): string {
       </div>
     </div>
     <div id="status"></div>
-    <footer>Availability updates hourly.</footer>
     ${cfg.footer ?? ''}
   </div>
 

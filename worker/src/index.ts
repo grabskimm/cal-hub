@@ -103,6 +103,7 @@ export interface Env {
   OWNER_NAME?: string; // personalises headings, e.g. "Book a time with Mendel"
   FOOTER_OWNER?: string; // legal name for the © footer, e.g. "Mendel Grabski"
   OWNER_SITE_URL?: string; // linked from the footer, e.g. https://mendelg.tech
+  SOURCE_URL?: string; // public source-code link shown in the footer
 
   // --- "Contact me" relay (/contact on the public host) ---
   CONTACT_TO?: string; // mailbox that receives notes
@@ -522,10 +523,14 @@ function buildFooter(env: Env): string {
     ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">${esc(url.replace(/^https?:\/\//, ''))}</a>`
     : '';
   const copyright = owner ? `© ${year} ${esc(owner)}. All rights reserved.${link}` : '';
+  // "Built it myself" line: source link + the fact it runs on Cloudflare Workers.
+  const src = (env.SOURCE_URL ?? '').trim();
+  const srcLink = src ? `<a href="${esc(src)}" target="_blank" rel="noopener">source</a> · ` : '';
+  const made = `<span class="madeby">⚡ Self-built · ${srcLink}runs on Cloudflare Workers</span>`;
+  const lines = [copyright, made].filter(Boolean).join('<br>');
   // Build tag lives in an HTML comment — visible in view-source for diagnostics,
   // but not cluttering the page.
-  const footerHtml = copyright ? `<footer>${copyright}</footer>` : '';
-  return `${footerHtml}<!-- availcal build ${BUILD_TAG} -->`;
+  return `<footer>${lines}</footer><!-- availcal build ${BUILD_TAG} -->`;
 }
 
 /** Origin of the PUBLIC host (where /book, /contact, / live), or '' if unset. */

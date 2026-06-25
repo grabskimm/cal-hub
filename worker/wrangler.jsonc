@@ -74,6 +74,8 @@
     // Footer: "© <year> <FOOTER_OWNER>. All rights reserved. · <site link>".
     "FOOTER_OWNER": "Mendel Grabski",
     "OWNER_SITE_URL": "https://mendelg.tech",
+    // Public source link shown in the footer ("self-built, runs on Cloudflare").
+    "SOURCE_URL": "https://github.com/grabskimm/cal-hub",
     // Optional explicit override for the public page title; when empty, OWNER_NAME
     // drives it.
     "PUBLIC_PAGE_TITLE": "",
@@ -88,7 +90,7 @@
     "BOOKING_OUTLOOK_FLAVOR": "office",
     // Owner phone shown for the "Phone" meeting option (and added to the event).
     // Leave empty to hide the Phone option.
-    "BOOKING_PHONE": "",
+    "BOOKING_PHONE": "+1-206-379-6587",
 
     // "Contact me" relay (/contact on the public host). CONTACT_TO receives the
     // notes; CONTACT_FROM must be a sender verified with your provider (Resend or
