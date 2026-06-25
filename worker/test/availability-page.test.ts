@@ -38,4 +38,23 @@ describe('availabilityHtml', () => {
   it('has a mobile breakpoint', () => {
     expect(SHARED_CSS).toContain('@media (max-width:620px)');
   });
+
+  it('does not embed a chat widget unless chat config is provided', () => {
+    expect(html).not.toContain('class="panel chatbox"');
+    expect(html).not.toContain('initChatWidget(');
+  });
+
+  it('embeds the chat widget inline when chat config is given', () => {
+    const withChat = availabilityHtml({
+      title: 'Find a time with Mendel', fallbackTz: 'UTC',
+      chat: { greeting: 'Hi! When works?', turnstileSiteKey: '0xSITEKEY' },
+    });
+    expect(withChat).toContain('class="panel chatbox"');
+    expect(withChat).toContain('class="chat-thread"');
+    expect(withChat).toContain('initChatWidget(');
+    expect(withChat).toContain('Hi! When works?');
+    // Turnstile loader + interaction-only widget when a site key is set.
+    expect(withChat).toContain('challenges.cloudflare.com/turnstile');
+    expect(withChat).toContain('data-appearance="interaction-only"');
+  });
 });

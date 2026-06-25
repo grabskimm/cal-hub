@@ -10,7 +10,7 @@ export interface AvailabilityPageCfg {
   fallbackTz: string; // used if the browser can't resolve a local zone
   footer?: string; // optional footer HTML (copyright/link)
   contactHref?: string; // when set, shows a "Contact" link in the top nav
-  chatHref?: string; // when set, shows a "Chat" link in the top nav (chat booker)
+  chat?: { greeting: string; turnstileSiteKey: string }; // when set, embeds the chat booker inline
 }
 
 // Light/dark theming, shared across every page. THEME_HEAD goes first in <head>
@@ -315,6 +315,94 @@ function createPicker(opts) {
 }
 `;
 
+// ---- Shared chat-booker widget ----------------------------------------------
+// A small message thread + composer that POSTs to /chat and renders {reply,
+// proposed?, booked?}. Used both standalone (the /chat page) and embedded inline
+// on the availability page. All CSS is scoped under .chatbox and the JS finds its
+// elements within a root node (by class, not global id) so multiple/embedded
+// instances never collide with the host page.
+export const CHAT_WIDGET_CSS = `
+  .chatbox { display:flex; flex-direction:column; }
+  .chatbox-title { font-size:.95rem; margin:0 0 .6rem; font-weight:700; color:var(--ink); }
+  .chatbox .chat-thread { display:flex; flex-direction:column; gap:.6rem; min-height:11rem; max-height:46vh; overflow-y:auto; padding:.3rem; }
+  .chatbox .chat-msg { padding:.6rem .85rem; border-radius:14px; max-width:85%; white-space:pre-wrap; line-height:1.45; font-size:.94rem; }
+  .chatbox .chat-msg.user { align-self:flex-end; background:linear-gradient(135deg,var(--brand),var(--brand2)); color:#fff; border-bottom-right-radius:5px; }
+  .chatbox .chat-msg.bot { align-self:flex-start; background:var(--card2); border:1px solid var(--line); color:var(--ink); border-bottom-left-radius:5px; }
+  .chatbox .chat-msg.typing { color:var(--muted); font-style:italic; }
+  .chatbox .chat-composer { display:flex; gap:.5rem; margin-top:.8rem; }
+  .chatbox .chat-input { flex:1; padding:.7rem .9rem; font:inherit; color:var(--ink); background:var(--field); border:1px solid var(--line); border-radius:12px; }
+  .chatbox .chat-input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 4px var(--ring); }
+  .chatbox .chat-send { border:0; cursor:pointer; font:inherit; font-weight:700; color:#fff; padding:.7rem 1.1rem; border-radius:12px;
+    background:linear-gradient(135deg,var(--brand),var(--brand2)); }
+  .chatbox .chat-send:disabled { opacity:.6; cursor:default; }
+  .chatbox .cf-turnstile { display:flex; justify-content:center; margin:.5rem 0 0; min-height:0; }
+  .chatbox .cf-turnstile:empty { margin:0; }
+  .chatbox .chat-hint { color:var(--muted); font-size:.8rem; margin:.6rem .2rem 0; }
+`;
+
+// The Turnstile loader <script>, included in <head> only when a site key is set.
+export const TURNSTILE_HEAD = `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`;
+
+/** Inner markup for a chat widget (caller wraps it in an element with class "chatbox"). */
+export function chatWidgetMarkup(turnstileSiteKey: string): string {
+  return `<div class="chat-thread"></div>
+      <div class="chat-composer">
+        <input class="chat-input" type="text" autocomplete="off" placeholder="e.g. 30 min next week, afternoons…" />
+        <button class="chat-send" type="button">Send</button>
+      </div>
+      ${turnstileSiteKey ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(turnstileSiteKey)}" data-appearance="interaction-only" data-size="flexible"></div>` : ''}
+      <p class="chat-hint">Bookings create a real calendar invite. Be specific about the day and time of day.</p>`;
+}
+
+// initChatWidget({ root, greeting, turnstile, endpoint? }) — wires one widget.
+export const CHAT_WIDGET_JS = `
+function initChatWidget(opts) {
+  var root = opts.root; if (!root) return;
+  var endpoint = opts.endpoint || '/chat';
+  var useTurnstile = !!opts.turnstile;
+  var thread = root.querySelector('.chat-thread');
+  var input = root.querySelector('.chat-input');
+  var sendBtn = root.querySelector('.chat-send');
+  var messages = [], proposed = [], seen = [], busy = false;
+  function add(role, text) {
+    var d = document.createElement('div');
+    d.className = 'chat-msg ' + (role === 'user' ? 'user' : 'bot');
+    d.textContent = text; thread.appendChild(d); thread.scrollTop = thread.scrollHeight; return d;
+  }
+  if (opts.greeting) add('bot', opts.greeting);
+  async function send() {
+    var text = input.value.trim(); if (!text || busy) return;
+    var turnstile = '';
+    if (useTurnstile) {
+      var t = root.querySelector('[name=cf-turnstile-response]') || document.querySelector('[name=cf-turnstile-response]');
+      turnstile = (t && t.value) || '';
+      if (!turnstile) { add('bot', "Just a sec — finishing a quick security check. Please resend in a moment (complete the check below if one appears)."); return; }
+    }
+    input.value = ''; add('user', text); messages.push({ role: 'user', content: text });
+    busy = true; sendBtn.disabled = true;
+    var typing = add('bot', '…'); typing.classList.add('typing');
+    try {
+      var res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: messages, proposed: proposed, seen: seen, turnstile: turnstile }) });
+      var data = await res.json().catch(function(){ return {}; });
+      typing.remove();
+      var reply = (data && data.reply) || (data && data.error) || 'Sorry, something went wrong.';
+      add('bot', reply); messages.push({ role: 'assistant', content: reply });
+      if (Array.isArray(data.proposed)) {
+        proposed = data.proposed;
+        // Remember everything we've shown so "more times" never repeats a slot.
+        for (var i = 0; i < proposed.length; i++) { if (seen.indexOf(proposed[i].start) < 0) seen.push(proposed[i].start); }
+      }
+      if (data.booked) { input.disabled = true; sendBtn.disabled = true; }
+      if (window.turnstile && useTurnstile) { try { window.turnstile.reset(); } catch (e) {} }
+    } catch (e) { typing.remove(); add('bot', 'Network error — please try again.'); }
+    finally { busy = false; if (!input.disabled) sendBtn.disabled = false; input.focus(); }
+  }
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
+}
+`;
+
 export function availabilityHtml(cfg: AvailabilityPageCfg): string {
   const cfgJson = JSON.stringify(cfg);
   return `<!doctype html>
@@ -324,14 +412,14 @@ export function availabilityHtml(cfg: AvailabilityPageCfg): string {
 ${THEME_HEAD}
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(cfg.title)}</title>
-<style>${SHARED_CSS}</style>
+<style>${SHARED_CSS}${cfg.chat ? CHAT_WIDGET_CSS : ''}</style>
+${cfg.chat && cfg.chat.turnstileSiteKey ? TURNSTILE_HEAD : ''}
 </head>
 <body>
   <header class="hero">
     <nav class="topnav">
       <a href="/">⌂ Home</a>
       <span class="spacer"></span>
-      ${cfg.chatHref ? `<a href="${escapeHtml(cfg.chatHref)}">💬 Chat</a>` : ''}
       ${cfg.contactHref ? `<a href="${escapeHtml(cfg.contactHref)}">✉ Contact</a>` : ''}
       ${THEME_BTN}
     </nav>
@@ -356,6 +444,10 @@ ${THEME_HEAD}
       </div>
     </div>
     <div id="status"></div>
+    ${cfg.chat ? `<div class="panel chatbox" style="margin-top:1.1rem;">
+      <h2 class="chatbox-title">💬 Or just ask</h2>
+      ${chatWidgetMarkup(cfg.chat.turnstileSiteKey)}
+    </div>` : ''}
     ${cfg.footer ?? ''}
   </div>
 
@@ -389,6 +481,8 @@ async function load() {
 }
 tzSel.addEventListener('change', ()=>picker.refresh());
 load();
+${cfg.chat ? `${CHAT_WIDGET_JS}
+initChatWidget({ root: document.querySelector('.chatbox'), greeting: CFG.chat.greeting, turnstile: ${cfg.chat.turnstileSiteKey ? 'true' : 'false'} });` : ''}
 </script>
 </body>
 </html>`;

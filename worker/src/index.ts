@@ -38,6 +38,7 @@ import {
 } from './chat';
 import { calendarHtml } from './calendar-view';
 import { type ChatPageCfg, chatPageHtml } from './chat-page';
+import { OWNER_BIO_DEFAULT } from './owner-bio';
 import { contactEnabled, contactHtml, sendContact, validateMessage } from './contact';
 import { EMBED_JS } from './embed';
 import {
@@ -267,7 +268,12 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
           fallbackTz: env.CALENDAR_FALLBACK_TZ ?? 'America/Los_Angeles',
           footer: buildFooter(env),
           contactHref: contactAvailable(env) ? '/contact' : undefined,
-          chatHref: chatEnabled(env) && schedulingEnabled(env) ? '/chat' : undefined,
+          chat: chatEnabled(env) && schedulingEnabled(env)
+            ? {
+                greeting: `Hi! Tell me roughly when you'd like to meet${name ? ` ${name}` : ''} — e.g. "30 minutes next week, afternoons" — and I'll find open times.`,
+                turnstileSiteKey: turnstileEnabled(env) ? (env.TURNSTILE_SITE_KEY ?? '') : '',
+              }
+            : undefined,
         });
         return new Response(html, {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
@@ -625,12 +631,21 @@ async function handleChat(env: Env, ctx: ExecutionContext, payload: Record<strin
         .map((s) => ({ start: String(s.start), end: String(s.end) }))
         .slice(0, 10)
     : [];
+  // Every slot start we've already shown this session, so a re-propose ("give me
+  // more times") returns fresh options instead of repeating the same list.
+  const seen: Set<string> = new Set(
+    Array.isArray(payload.seen)
+      ? (payload.seen as unknown[]).filter((x) => typeof x === 'string').map((x) => String(x)).slice(0, 300)
+      : [],
+  );
+  for (const s of proposed) seen.add(s.start);
 
   const tz = env.SCHEDULE_WORK_TZ || env.AVAILCAL_DEFAULT_TZ || 'America/New_York';
   const durationMin = Number(env.SCHEDULE_SLOT_MINUTES ?? '30') || 30;
   const meetings = ['teams', ...(zoomEnabled(env) ? ['zoom'] : []), ...((env.BOOKING_PHONE ?? '').trim() ? ['phone'] : []), 'none'];
   const today = isoDate(Date.now());
-  const sys = systemPrompt({ todayIso: today, ownerName: (env.OWNER_NAME ?? 'me').trim() || 'me', tz, durationMin, proposed, meetings, mode, bio: env.OWNER_BIO });
+  const bio = (env.OWNER_BIO ?? '').trim() || OWNER_BIO_DEFAULT;
+  const sys = systemPrompt({ todayIso: today, ownerName: (env.OWNER_NAME ?? 'me').trim() || 'me', tz, durationMin, proposed, meetings, mode, bio });
 
   let action;
   try {
@@ -662,7 +677,7 @@ async function handleChat(env: Env, ctx: ExecutionContext, payload: Record<strin
     const dur = action.durationMin && action.durationMin >= 5 && action.durationMin <= 480 ? action.durationMin : durationMin;
     let ranked: Slot[] = [];
     try {
-      ranked = rankSlots(findSlots(busy, chatSlotParams({ ...base, durationMin: dur }, from, to)), { partOfDay: action.partOfDay, days: action.days }, tz, 3);
+      ranked = rankSlots(findSlots(busy, chatSlotParams({ ...base, durationMin: dur }, from, to)), { partOfDay: action.partOfDay, days: action.days, exclude: seen }, tz, 3);
     } catch { ranked = []; }
     return jsonResponse({ reply: formatProposedReply(action.reply ?? '', ranked, tz), proposed: ranked }, 200);
   }

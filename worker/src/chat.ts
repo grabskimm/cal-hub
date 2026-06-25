@@ -58,7 +58,7 @@ export function localHour(iso: string, tz: string): number {
 /** Filter + cap the computed slots by the model's preferences (pure). */
 export function rankSlots(
   slots: Slot[],
-  prefs: { partOfDay?: string; days?: number[] },
+  prefs: { partOfDay?: string; days?: number[]; exclude?: Set<string> },
   tz: string,
   max = 3,
 ): Slot[] {
@@ -66,6 +66,8 @@ export function rankSlots(
   const days = prefs.days && prefs.days.length ? new Set(prefs.days) : null;
   const out: Slot[] = [];
   for (const s of slots) {
+    // Skip already-shown slots so "give me more times" returns fresh options.
+    if (prefs.exclude && prefs.exclude.has(s.start)) continue;
     if (bounds) {
       const h = localHour(s.start, tz);
       if (h < bounds[0] || h >= bounds[1]) continue;
@@ -139,6 +141,7 @@ export function systemPrompt(opts: {
     `- {"kind":"propose", "partOfDay":"morning|afternoon|evening|any", "days":[1,2], "fromDate":"YYYY-MM-DD","toDate":"YYYY-MM-DD","durationMin":30, "reply":"short friendly sentence"} — when the user wants to find a time. The app fills in the real slots.`,
     `- {"kind":"book", "pickIndex":N, "email":"...","name":"...","meeting":"teams|zoom|phone|none", "reply":"..."} — when the user picks one of the numbered proposed slots and has given an email. pickIndex is 1-based into the proposed list.`,
     `- {"kind":"reply", "reply":"..."} — to answer a question${opts.mode === 'assistant' ? ` about ${opts.ownerName}` : ''}, ask for missing info, or chat.`,
+    `If the user asks for MORE, OTHER, or DIFFERENT times (e.g. "give me more times for Monday"), emit another "propose" — the app returns fresh options each time and never repeats one it already showed. Do NOT restate times yourself.`,
     `Meeting options available: ${opts.meetings.join(', ')}. If the user doesn't say, default meeting to "teams".`,
     opts.proposed && opts.proposed.length ? `Currently proposed slots (use pickIndex):\n${proposedList}` : `No slots are proposed yet.`,
     `Always include a brief, warm "reply". Output ONLY the JSON.`,

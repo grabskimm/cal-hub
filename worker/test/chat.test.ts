@@ -78,6 +78,13 @@ describe('rankSlots', () => {
   it('caps to max', () => {
     expect(rankSlots(slots, {}, tz, 2).length).toBe(2);
   });
+  it('excludes already-shown slots so "more times" returns fresh ones', () => {
+    const exclude = new Set(['2026-07-14T09:00:00.000Z', '2026-07-14T14:00:00.000Z']);
+    const r = rankSlots(slots, { exclude }, tz, 3);
+    expect(r.map((s) => s.start)).toEqual([
+      '2026-07-15T15:00:00.000Z', '2026-07-15T19:00:00.000Z',
+    ]);
+  });
 });
 
 describe('formatProposedReply', () => {

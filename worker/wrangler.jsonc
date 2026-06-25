@@ -129,11 +129,14 @@
     "CHAT_HOST": "chat.mendelg.tech",
 
     // On the dedicated CHAT_HOST the chat runs in "assistant" mode: it can answer
-    // questions about you (from this bio) as well as book time. Keep it short —
-    // a few sentences mirroring your site (e.g. mendelg.tech). On the public
-    // availability host the chat stays scheduling-only and ignores this. The
-    // model is told to use ONLY these facts and never invent biographical detail.
-    "OWNER_BIO": "Mendel Grabski is a builder and engineer. He created this self-hosted availability + scheduling system that runs entirely on Cloudflare Workers. Learn more at https://mendelg.tech."
+    // questions about you (from a bio) as well as book time. On the public
+    // availability host the chat stays scheduling-only and ignores this. The model
+    // is told to use ONLY these facts and never invent biographical detail.
+    //
+    // Leave empty to use the built-in default bio in src/owner-bio.ts (the full,
+    // maintained persona). Set a value here (or via `wrangler secret put
+    // OWNER_BIO`) only to override it without a code change.
+    "OWNER_BIO": ""
   },
 
   "observability": { "enabled": true }
