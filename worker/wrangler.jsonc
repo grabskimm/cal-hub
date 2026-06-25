@@ -84,7 +84,7 @@
     // BOOKING_OUTLOOK_FLAVOR picks the Outlook quick-link: "office" (M365) or
     // "live" (personal outlook.com).
     "BOOKING_OWNER_EMAIL": "mendel@mendelg.tech",
-    "BOOKING_TITLE": "Meeting",
+    "BOOKING_TITLE": "Meeting with Mendel Grabski",
     "BOOKING_OUTLOOK_FLAVOR": "office",
 
     // "Contact me" relay (/contact on the public host). CONTACT_TO receives the
