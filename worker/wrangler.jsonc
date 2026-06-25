@@ -84,7 +84,7 @@
     // BOOKING_OUTLOOK_FLAVOR picks the Outlook quick-link: "office" (M365) or
     // "live" (personal outlook.com).
     "BOOKING_OWNER_EMAIL": "mendel@mendelg.tech",
-    "BOOKING_TITLE": "Meeting with Mendel Grabski",
+    "BOOKING_TITLE": "Meeting",
     "BOOKING_OUTLOOK_FLAVOR": "office",
 
     // "Contact me" relay (/contact on the public host). CONTACT_TO receives the
@@ -103,7 +103,13 @@
     // the Application Audience (AUD) tag from the Access app. See
     // infra/cloudflare/ACCESS.md.
     "ACCESS_TEAM_DOMAIN": "https://mendelgtech.cloudflareaccess.com",
-    "ACCESS_AUD": "ecddba41d76a4361ef7f21107c1d5009321b7d35e9e2571eb27f401f797d044f"
+    "ACCESS_AUD": "ecddba41d76a4361ef7f21107c1d5009321b7d35e9e2571eb27f401f797d044f",
+    
+    // Outlook scheduling
+    "MS_TENANT_ID": "a7c6476e-ba22-49d0-ba37-c2427888403d",
+    "MS_CLIENT_ID": "fd69c9ef-59c2-49f2-bfc3-275c07a8ca47",
+    "MS_MAILBOX": "mendel@mendelg.tech",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAADq5MvxLosP8lKi5"
   },
 
   "observability": { "enabled": true }
