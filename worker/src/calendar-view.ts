@@ -146,6 +146,7 @@ export function calendarHtml(cfg: CalendarPageCfg): string {
   /* meeting-hours dashboard stats */
   .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.6rem; margin:.9rem .2rem 0; }
   .stats .stat { border:1px solid var(--line); border-radius:12px; padding:.7rem .8rem; background:#fff; }
+  .stats .stat.active { border-color:var(--brand); box-shadow:inset 0 0 0 1px var(--brand); }
   .stats .stat .lbl { font-size:.62rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
   .stats .stat .val { font-size:1.5rem; font-weight:800; line-height:1.15; margin-top:.15rem; }
   .stats .stat .val .u { font-size:.85rem; font-weight:700; color:var(--muted); margin-left:1px; }
@@ -247,6 +248,20 @@ const monthEl = document.getElementById('month');
 const timeWrap = document.getElementById('timewrap');
 const statusEl = document.getElementById('status');
 const statsEl = document.getElementById('stats');
+
+// Distinct, white-text-friendly categorical palette. Each UNIQUE label present
+// gets its own well-separated colour (assigned by position in the sorted label
+// set), so labels never collapse into a wall of blue the way a per-label hue
+// hash can. labelColor() stays as the deterministic fallback past 12 labels.
+const PALETTE = ['#3b6fb0','#e1762f','#3f9d54','#b3473f','#7b59a8','#1f9e9e',
+                 '#c84e8f','#8a8f2e','#5a6dd0','#b9892b','#2f9d76','#c0593a'];
+let COLOR_OF = {};
+function buildColors() {
+  const uniq = Array.from(new Set(events.map((e) => e.source))).sort();
+  COLOR_OF = {};
+  uniq.forEach((l, i) => { COLOR_OF[l] = PALETTE[i % PALETTE.length]; });
+}
+function colorFor(label) { return COLOR_OF[label] || labelColor(label); }
 const legendEl = document.getElementById('legend');
 const periodEl = document.getElementById('period');
 const hintEl = document.getElementById('hint');
@@ -287,7 +302,7 @@ function columns() {
 function renderLegend(labels) {
   legendEl.innerHTML = '';
   for (const l of [...labels].sort()) {
-    const k = el('span','k',''); const sw = el('span','sw',''); sw.style.background = labelColor(l);
+    const k = el('span','k',''); const sw = el('span','sw',''); sw.style.background = colorFor(l);
     k.appendChild(sw); k.appendChild(document.createTextNode(l)); legendEl.appendChild(k);
   }
 }
@@ -348,32 +363,41 @@ function fmtHours(min) {
   return h >= 10 ? String(Math.round(h)) : (Math.round(h * 10) / 10).toFixed(1).replace(/\.0$/, '');
 }
 
-// Stats are anchored to the real current date (a dashboard summary), not the
-// calendar's navigation anchor, and recompute whenever the data reloads.
+// Stats follow the period you're viewing (the navigation anchor), so you see
+// the day/week/month currently on screen; the card matching the active view is
+// highlighted. They recompute whenever the data reloads (new invites).
 function renderStats(tz) {
   const byDay = meetingMinutesByDay(tz);
   const today = todayKey(tz);
-  const weekStart = startOfWeek(today);
+  const day = anchor;
+  const weekStart = startOfWeek(anchor);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const month = today.slice(0, 7);
+  const month = anchor.slice(0, 7);
   const monthDays = Object.keys(byDay).filter((d) => d.slice(0, 7) === month);
   const sum = (days) => days.reduce((a, d) => a + (byDay[d] || 0), 0);
 
   let cDay = 0, cWeek = 0, cMonth = 0;
   for (const ev of events) {
     const sd = tzParts(ev.start, tz).dayKey;
-    if (sd === today) cDay++;
+    if (sd === day) cDay++;
     if (weekDays.indexOf(sd) !== -1) cWeek++;
     if (sd.slice(0, 7) === month) cMonth++;
   }
-  const card = (lbl, minutes, n) =>
-    '<div class="stat"><div class="lbl">' + lbl + '</div>' +
+
+  const shortDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString([], { month:'short', day:'numeric' });
+  const dayLbl = day === today ? 'Today'
+    : new Date(day + 'T12:00:00').toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' });
+  const weekLbl = weekDays.indexOf(today) !== -1 ? 'This week' : shortDate(weekStart) + '–' + shortDate(weekDays[6]);
+  const monthLbl = new Date(anchor + 'T12:00:00').toLocaleDateString([], { month:'long', year:'numeric' });
+
+  const card = (key, lbl, minutes, n) =>
+    '<div class="stat' + (view === key ? ' active' : '') + '"><div class="lbl">' + lbl + '</div>' +
     '<div class="val">' + fmtHours(minutes) + '<span class="u">h</span></div>' +
     '<div class="sub">' + n + (n === 1 ? ' meeting' : ' meetings') + '</div></div>';
   statsEl.innerHTML =
-    card('Today', sum([today]), cDay) +
-    card('This week', sum(weekDays), cWeek) +
-    card('This month', sum(monthDays), cMonth);
+    card('day', dayLbl, sum([day]), cDay) +
+    card('week', weekLbl, sum(weekDays), cWeek) +
+    card('month', monthLbl, sum(monthDays), cMonth);
 }
 
 function renderTimeGrid(tz) {
@@ -410,7 +434,7 @@ function renderTimeGrid(tz) {
     for (const it of dayEvs) {
       const top = (it.startMin/1440)*DAY_PX;
       const hgt = Math.max(16, ((it.endMin - it.startMin)/1440)*DAY_PX);
-      const color = labelColor(it.ev.source);
+      const color = colorFor(it.ev.source);
       labels.add(it.ev.source);
       const box = el('div','ev' + (it.ev.status==='tentative'?' tent':''), '');
       box.style.top = top+'px'; box.style.height = hgt+'px'; box.style.background = color;
@@ -454,7 +478,7 @@ function renderMonth(tz) {
     for (const ev of dayEvs.slice(0,3)) {
       labels.add(ev.source);
       const m = el('div','mev', fmtTime(ev.start, tz) + ' ' + ev.source);
-      m.style.background = labelColor(ev.source);
+      m.style.background = colorFor(ev.source);
       cell.appendChild(m);
     }
     if (dayEvs.length > 3) cell.appendChild(el('div','more', '+' + (dayEvs.length - 3) + ' more'));
@@ -473,6 +497,7 @@ function periodLabel(tz) {
 
 function render() {
   const tz = tzSel.value;
+  buildColors();
   if (!anchor) anchor = todayKey(tz);
   if (view === 'month') {
     timeWrap.hidden = true; monthEl.hidden = false; hintEl.textContent = 'Tip: click a day to open its detailed view.';
@@ -508,6 +533,7 @@ function saveDismissed(set) { try { localStorage.setItem(DISMISS_KEY, JSON.strin
 function notifKey(n) { return n.source + '|' + n.start + '|' + n.end; }
 
 function renderNotifications() {
+  buildColors();
   const dismissed = loadDismissed();
   const tz = tzSel.value;
   const items = (additions || []).filter((n) => !dismissed.has(notifKey(n)));
@@ -528,7 +554,7 @@ function renderNotifications() {
   const list = el('ul','notify-list','');
   for (const n of items) {
     const li = el('li','notify-item','');
-    const sw = el('span','sw',''); sw.style.background = labelColor(n.source); li.appendChild(sw);
+    const sw = el('span','sw',''); sw.style.background = colorFor(n.source); li.appendChild(sw);
     li.appendChild(el('span','src', n.source));
     li.appendChild(el('span','when', new Date(n.start).toLocaleString([], { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZone: tz })));
     const x = el('button','x','×'); x.type = 'button'; x.title = 'Dismiss';
