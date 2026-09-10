@@ -560,6 +560,20 @@ function isoDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/**
+ * Parse a YYYY-MM-DD calendar date as UTC midnight, or null if it is not a real
+ * date. `Date.parse` alone is not enough: it returns NaN for `9999-99-99`, and
+ * a NaN bound used to disable the range clamp rather than reject the request.
+ * The round-trip through isoDate() rejects overflow forms (Feb 30, month 13).
+ */
+function utcDateMs(s: string): number | null {
+  const t = s.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const ms = Date.parse(t + 'T00:00:00Z');
+  if (!Number.isFinite(ms)) return null;
+  return isoDate(ms) === t ? ms : null;
+}
+
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
 }
@@ -769,20 +783,36 @@ async function handleSlots(url: URL, env: Env): Promise<Response> {
   const workTz = env.SCHEDULE_WORK_TZ || env.AVAILCAL_DEFAULT_TZ || 'America/New_York';
   const displayTz = q.get('tz') || workTz;
 
-  const fromDate = q.get('from') || isoDate(nowMs);
   const maxRange = Number(env.SCHEDULE_MAX_RANGE_DAYS ?? '62') || 62;
-  const fromMs = Date.parse(fromDate + 'T00:00:00Z');
-  let toDate = q.get('to') || isoDate(nowMs + 7 * DAY_MS);
-  let toMs = Date.parse(toDate + 'T00:00:00Z');
-  if (Number.isFinite(fromMs) && Number.isFinite(toMs)) {
-    if (toMs < fromMs) toMs = fromMs;
-    if (toMs - fromMs > maxRange * DAY_MS) toMs = fromMs + maxRange * DAY_MS;
-    toDate = isoDate(toMs);
-  }
+  const todayMs = utcDateMs(isoDate(nowMs)) as number;
 
+  // Reject unparseable bounds instead of silently skipping the clamp. The old
+  // guard only clamped `if (Number.isFinite(fromMs) && Number.isFinite(toMs))`,
+  // so a regex-valid but calendar-invalid `to` (e.g. 9999-99-99) parsed to NaN,
+  // bypassed SCHEDULE_MAX_RANGE_DAYS entirely, and left computeSlots walking the
+  // day cursor for millennia on one unauthenticated GET.
+  const rawFrom = q.get('from');
+  const rawTo = q.get('to');
+  const parsedFrom = rawFrom === null ? todayMs : utcDateMs(rawFrom);
+  if (parsedFrom === null) return jsonResponse({ error: 'invalid "from": expected YYYY-MM-DD' }, 400);
+  const parsedTo = rawTo === null ? todayMs + 7 * DAY_MS : utcDateMs(rawTo);
+  if (parsedTo === null) return jsonResponse({ error: 'invalid "to": expected YYYY-MM-DD' }, 400);
+
+  // Never scan the past: computeSlots drops those candidates anyway (startMs <
+  // nowMs), so a far-past `from` changed nothing but the CPU bill.
+  const fromMs = Math.max(parsedFrom, todayMs);
+  let toMs = parsedTo;
+  if (toMs < fromMs) toMs = fromMs;
+  if (toMs - fromMs > maxRange * DAY_MS) toMs = fromMs + maxRange * DAY_MS;
+  const fromDate = isoDate(fromMs);
+  const toDate = isoDate(toMs);
+
+  // Bounded, not merely positive: `step` drives candidates-per-day, so tiny or
+  // fractional values were a cheap CPU amplifier. Out-of-range falls back to the
+  // default rather than erroring, preserving the previous lenient contract.
   const num = (v: string | null, d: number) => {
     const n = Number(v);
-    return v !== null && Number.isFinite(n) && n > 0 ? n : d;
+    return v !== null && Number.isFinite(n) && n >= 5 && n <= 480 ? n : d;
   };
   const durationMin = num(q.get('duration'), Number(env.SCHEDULE_SLOT_MINUTES ?? '30') || 30);
   const stepMin = num(q.get('step'), durationMin);
@@ -791,10 +821,25 @@ async function handleSlots(url: URL, env: Env): Promise<Response> {
   const workEnd = env.SCHEDULE_WORK_END || '18:00';
 
   const obj = await env.AVAILCAL_BUCKET.get(PUBLIC_FREEBUSY_KEY);
-  const busy: Busy[] = obj ? await obj.json() : [];
+  // Fail CLOSED. A missing object used to become `busy = []`, i.e. every working
+  // hour advertised as free — the dangerous direction, and reachable whenever the
+  // merge job hasn't run yet or the public feed isn't enabled (it is off by
+  // default). Better to say "unknown" than to invite bookings over real meetings.
+  if (!obj) {
+    return jsonResponse({ error: 'availability is not published yet' }, 503, { 'Cache-Control': 'no-store' });
+  }
+  const busy: Busy[] = await obj.json();
 
   try {
-    const days = parseDays(q.get('days') || env.SCHEDULE_DAYS || '1-5');
+    // A caller may NARROW the owner's bookable weekdays, never widen them. This
+    // was `q.get('days') || env.SCHEDULE_DAYS`, so ?days=0-6 advertised weekend
+    // slots the owner never offered — which POST /book then rejected with 409,
+    // because it re-validates against env alone.
+    const ownerDays = parseDays(env.SCHEDULE_DAYS || '1-5');
+    const requestedDays = q.get('days');
+    const days = requestedDays === null
+      ? ownerDays
+      : parseDays(requestedDays).filter((d) => ownerDays.includes(d));
     const slots = computeSlots(busy, {
       fromDate,
       toDate,

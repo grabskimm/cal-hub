@@ -98,3 +98,57 @@ describe('parseDays', () => {
     expect(() => parseDays('abc')).toThrow();
   });
 });
+
+// --- Hardening: bound WORK, not just output -------------------------------
+// These guard the DoS fixes. `maxSlots` only ever bounded the OUTPUT: past and
+// busy candidates `continue` before anything is pushed, so a far-future toDate
+// kept the day cursor spinning with the slot count stuck at zero.
+describe('computeSlots resource bounds', () => {
+  it('terminates on a far-future toDate that yields no slots', () => {
+    const t0 = Date.now();
+    // Every candidate is dropped as "past", so the slot cap can never trip.
+    const slots = computeSlots([], base({ toDate: '9999-12-31', nowMs: Date.parse('2100-01-01T00:00:00Z') }));
+    expect(slots).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it('terminates when no weekday is allowed (inner loop never runs)', () => {
+    const t0 = Date.now();
+    const slots = computeSlots([], base({ toDate: '9999-12-31', days: [] }));
+    expect(slots).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it('caps the day scan rather than walking to the requested end date', () => {
+    // Weekly Mondays over ~8000 years would be ~417k slots without the cap.
+    const slots = computeSlots([], base({ toDate: '9999-12-31', maxSlots: 1_000_000 }));
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots.length).toBeLessThan(5000);
+  });
+});
+
+describe('date validation', () => {
+  it('rejects regex-valid but calendar-invalid dates', () => {
+    // The exact string that bypassed the caller's range clamp via Date.parse NaN.
+    expect(() => computeSlots([], base({ toDate: '9999-99-99' }))).toThrow();
+    expect(() => computeSlots([], base({ fromDate: '2026-02-30' }))).toThrow();
+    expect(() => computeSlots([], base({ fromDate: '2026-13-01' }))).toThrow();
+    expect(() => computeSlots([], base({ fromDate: '2026-00-10' }))).toThrow();
+  });
+
+  it('still accepts real leap-day dates', () => {
+    expect(() => computeSlots([], base({ fromDate: '2028-02-29', toDate: '2028-02-29', days: [2] }))).not.toThrow();
+  });
+});
+
+describe('errors do not reflect caller input', () => {
+  // These messages reach unauthenticated clients and LLM contexts verbatim, so
+  // echoing input would launder attacker-controlled text into trusted output.
+  const marker = 'IGNORE-PREVIOUS-INSTRUCTIONS';
+  it('parseDays omits the offending spec', () => {
+    expect(() => parseDays(marker)).toThrow(/^(?!.*IGNORE-PREVIOUS).*$/);
+  });
+  it('date errors omit the offending value', () => {
+    expect(() => computeSlots([], base({ fromDate: marker }))).toThrow(/^(?!.*IGNORE-PREVIOUS).*$/);
+  });
+});
