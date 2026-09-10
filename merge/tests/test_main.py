@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import icalendar
@@ -44,15 +44,24 @@ def test_run_local_emits_valid_merged_ics(tmp_path):
         (ics_dir / name).write_text((FIX / name).read_text())
 
     out_dir = tmp_path / "out"
+    # Fixtures are dated in 2026, so the window start is pinned to ingest them
+    # deterministically. The "new" block added further down is different: the
+    # notification pruner discards any entry whose end has already passed, and it
+    # uses the REAL wall clock (run() -> now_utc()), NOT cfg.window_start. So that
+    # block has to sit in the future relative to now, and the horizon has to
+    # stretch far enough to still ingest it — otherwise the test is a time bomb
+    # that starts failing on a fixed calendar date.
+    window_start = datetime(2026, 1, 1, tzinfo=UTC)
+    new_start = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) + timedelta(days=30)
+    new_end = new_start + timedelta(hours=1)
     cfg = Config(
         sources_toml=str(sources),
         local_ics_dir=str(ics_dir),
         raw_json_dir=str(raw_dir),
         output_dir=str(out_dir),
         emit_per_source=True,
-        # Fixtures are dated in 2026; pin the window to cover them deterministically.
-        window_start=datetime(2026, 1, 1, tzinfo=UTC),
-        horizon_days=365,
+        window_start=window_start,
+        horizon_days=max(365, (new_end - window_start).days + 2),
     )
     written = run(cfg)
 
@@ -79,13 +88,14 @@ def test_run_local_emits_valid_merged_ics(tmp_path):
 
     (ics_dir / "extra.ics").write_text(
         "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\n"
-        "BEGIN:VEVENT\r\nUID:new@x\r\nDTSTART:20260701T090000Z\r\nDTEND:20260701T100000Z\r\n"
+        f"BEGIN:VEVENT\r\nUID:new@x\r\nDTSTART:{new_start.strftime('%Y%m%dT%H%M%SZ')}\r\n"
+        f"DTEND:{new_end.strftime('%Y%m%dT%H%M%SZ')}\r\n"
         "SUMMARY:busy\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
     )
     run(cfg)
     added = json.loads(added_path.read_text())
     assert len(added) == 1
-    assert added[0]["start"] == "2026-07-01T09:00:00Z"
+    assert added[0]["start"] == new_start.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert "firstSeen" in added[0]
 
 

@@ -31,10 +31,17 @@ export interface Slot {
 }
 
 /**
- * Offset (ms) such that `localWallClock = utcInstant + offset` for `tz` at the
- * given instant. Uses Intl to read the zone's wall time and diff it against UTC.
+ * `Intl.DateTimeFormat` construction dominates slot computation — it was built
+ * twice per candidate slot (once per `tzOffsetMs` probe in `wallTimeToUtcMs`),
+ * so a wide window cost seconds of CPU. The formatter depends only on the zone,
+ * so cache one per tz. Keys come from owner-controlled env (never a query
+ * param), but the map is capped anyway so it can't grow without bound.
  */
-export function tzOffsetMs(utcMs: number, tz: string): number {
+const OFFSET_DTF = new Map<string, Intl.DateTimeFormat>();
+
+function offsetFormatter(tz: string): Intl.DateTimeFormat {
+  const hit = OFFSET_DTF.get(tz);
+  if (hit) return hit;
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hourCycle: 'h23',
@@ -45,6 +52,17 @@ export function tzOffsetMs(utcMs: number, tz: string): number {
     minute: '2-digit',
     second: '2-digit',
   });
+  if (OFFSET_DTF.size >= 50) OFFSET_DTF.clear();
+  OFFSET_DTF.set(tz, dtf);
+  return dtf;
+}
+
+/**
+ * Offset (ms) such that `localWallClock = utcInstant + offset` for `tz` at the
+ * given instant. Uses Intl to read the zone's wall time and diff it against UTC.
+ */
+export function tzOffsetMs(utcMs: number, tz: string): number {
+  const dtf = offsetFormatter(tz);
   const p: Record<string, number> = {};
   for (const part of dtf.formatToParts(new Date(utcMs))) {
     if (part.type !== 'literal') p[part.type] = Number(part.value);
@@ -75,19 +93,48 @@ export function wallTimeToUtcMs(
   return utc;
 }
 
+// These messages deliberately do NOT echo the offending input. Callers surface
+// them verbatim to unauthenticated clients (and, via the chat/agent surfaces,
+// into an LLM context), so reflecting caller-supplied text would launder
+// attacker-controlled strings into output that reads as trusted tool result.
 function parseHHMM(s: string): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
-  if (!m) throw new Error(`invalid HH:MM: ${s}`);
+  if (!m) throw new Error('invalid time: expected HH:MM');
   const h = Number(m[1]);
   const min = Number(m[2]);
-  if (h > 23 || min > 59) throw new Error(`invalid HH:MM: ${s}`);
+  if (h > 23 || min > 59) throw new Error('invalid time: expected HH:MM');
   return h * 60 + min;
 }
 
+/**
+ * Parse YYYY-MM-DD, rejecting anything that is not a REAL calendar date.
+ *
+ * The regex alone accepted `9999-99-99`. Upstream, `Date.parse` on that same
+ * string returns NaN, which skipped the caller's range clamp entirely — so a
+ * single unauthenticated request could drive the day loop for millennia. Both
+ * halves are fixed: here we reject, and the caller no longer treats an
+ * unparseable bound as "no clamp needed".
+ */
 function parseDate(s: string): { y: number; mo: number; d: number } {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-  if (!m) throw new Error(`invalid date (YYYY-MM-DD): ${s}`);
-  return { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
+  if (!m) throw new Error('invalid date: expected YYYY-MM-DD');
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  // Round-trip through UTC so overflow (month 99, Feb 30, Apr 31) is caught:
+  // Date.UTC silently rolls those over into a different date.
+  const probe = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    mo < 1 ||
+    mo > 12 ||
+    d < 1 ||
+    probe.getUTCFullYear() !== y ||
+    probe.getUTCMonth() !== mo - 1 ||
+    probe.getUTCDate() !== d
+  ) {
+    throw new Error('invalid date: not a real calendar date');
+  }
+  return { y, mo, d };
 }
 
 /** Parse "1-5" or "0,1,2" into a sorted unique weekday list. */
@@ -100,7 +147,7 @@ export function parseDays(spec: string): number[] {
     } else if (/^\d$/.test(tok)) {
       out.add(Number(tok) % 7);
     } else {
-      throw new Error(`invalid days spec: ${spec}`);
+      throw new Error('invalid days spec: expected e.g. "1-5" or "0,6"');
     }
   }
   return [...out].sort((a, b) => a - b);
@@ -112,6 +159,20 @@ function overlapsBusy(startMs: number, endMs: number, busy: Array<[number, numbe
   }
   return false;
 }
+
+/**
+ * Hard ceilings on WORK, independent of how many slots come out.
+ *
+ * `maxSlots` bounds only the OUTPUT: past and busy candidates `continue` before
+ * anything is pushed, and an empty `days` set skips the inner loop altogether —
+ * so with a far-future `toDate` the day cursor spun on with the slot count
+ * stuck at zero. These make the function terminate on adversarial input by
+ * construction, whatever the caller did or failed to clamp. Both sit far above
+ * any legitimate query (the public handler clamps to ~62 days, ≈20 candidates
+ * per day), so real requests never reach them.
+ */
+const MAX_SCAN_DAYS = 366;
+const MAX_CANDIDATES = 100_000;
 
 /** Compute bookable free slots. */
 export function computeSlots(busyRaw: Busy[], p: SlotParams): Slot[] {
@@ -133,13 +194,17 @@ export function computeSlots(busyRaw: Busy[], p: SlotParams): Slot[] {
   const last = Date.UTC(to.y, to.mo - 1, to.d);
 
   const slots: Slot[] = [];
-  while (cursor <= last && slots.length < p.maxSlots) {
+  let daysScanned = 0;
+  let candidates = 0;
+  while (cursor <= last && slots.length < p.maxSlots && daysScanned < MAX_SCAN_DAYS) {
+    daysScanned++;
     const cd = new Date(cursor);
     const y = cd.getUTCFullYear();
     const mo = cd.getUTCMonth() + 1;
     const d = cd.getUTCDate();
     if (allowed.has(cd.getUTCDay())) {
       for (let t = startMin; t + p.durationMin <= endMin; t += step) {
+        if (++candidates > MAX_CANDIDATES) return slots;
         const startMs = wallTimeToUtcMs(y, mo, d, Math.floor(t / 60), t % 60, p.tz);
         const endMs = startMs + durMs;
         if (startMs < p.nowMs) continue; // past
