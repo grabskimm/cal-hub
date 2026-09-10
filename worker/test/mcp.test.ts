@@ -14,6 +14,8 @@ import {
   validTimezone,
 } from '../src/mcp';
 import { type Busy } from '../src/slots';
+import { bookingSlotParams, isoDate } from '../src/schedule-config';
+import { slotIsBookable } from '../src/scheduling';
 
 const NOW = Date.parse('2026-06-22T00:00:00Z'); // a Monday
 
@@ -311,13 +313,54 @@ describe('MCP is read-only by construction', () => {
   });
 
   it('imports only pure computation, never a writer', () => {
-    const imports = [...code.matchAll(/^import .*? from '([^']+)';$/gm)].map((m) => m[1]);
+    // Multiline-aware: a single-line-only pattern silently missed a wrapped
+    // `import { ... } from '...'`, which is exactly how a writer would sneak in.
+    const imports = [...code.matchAll(/\bimport\b[\s\S]*?from\s*'([^']+)'/g)].map((m) => m[1]);
     expect(imports.sort()).toEqual([
       './chat',
+      './schedule-config',
       './scheduling',
       './slots',
       '@modelcontextprotocol/server',
       'zod',
     ]);
+  });
+});
+
+// --- cross-surface consistency ---------------------------------------------
+// The reason the slot rules were consolidated: POST /book re-validates a posted
+// time by recomputing slots. If any surface offers a time computed on a
+// different grid, the visitor gets a 409 AFTER committing. This asserts the
+// offer and the booking check agree.
+describe('every offered slot is bookable', () => {
+  const cfg = scheduleConfig({});
+
+  it('MCP offers only times POST /book accepts', () => {
+    const busy: Busy[] = [{ start: '2026-06-23T14:00:00Z', end: '2026-06-23T15:30:00Z' }];
+    const c = ctx({ busy, cfg });
+    const listed = listOpenSlots(
+      { from_date: '2026-06-22', to_date: '2026-06-26', max_results: 50 },
+      c,
+    );
+    expect(listed.slots.length).toBeGreaterThan(10);
+    for (const slot of listed.slots) {
+      const day = isoDate(Date.parse(slot.start_utc));
+      // Exactly what POST /book does with the posted time.
+      const ok = slotIsBookable(
+        busy,
+        bookingSlotParams(cfg, day, day, NOW),
+        slot.start_utc,
+        slot.end_utc,
+      );
+      expect(ok, `offered ${slot.start_utc} but /book would reject it`).toBe(true);
+    }
+  });
+
+  it('does not offer a time inside a busy block', () => {
+    const busy: Busy[] = [{ start: '2026-06-22T13:00:00Z', end: '2026-06-22T14:00:00Z' }];
+    const listed = listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx({ busy, cfg }));
+    for (const slot of listed.slots) {
+      expect(Date.parse(slot.start_utc)).not.toBe(Date.parse('2026-06-22T13:00:00Z'));
+    }
   });
 });

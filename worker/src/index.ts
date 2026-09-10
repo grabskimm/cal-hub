@@ -30,7 +30,6 @@ import {
   callModel,
   chatEnabled,
   type ChatMode,
-  chatSlotParams,
   findSlots,
   formatProposedReply,
   parseAction,
@@ -56,7 +55,15 @@ import {
   verifyTurnstile,
   zoomEnabled,
 } from './scheduling';
-import { createMcpServer, scheduleConfig } from './mcp';
+import { createMcpServer } from './mcp';
+import {
+  bookingSlotParams,
+  isoDate,
+  loadPublicBusy,
+  narrowDays,
+  resolveWindow,
+  scheduleConfig,
+} from './schedule-config';
 import { type Busy, type Slot, computeSlots, parseDays } from './slots';
 
 export interface Env {
@@ -174,8 +181,6 @@ const MCP_CORS: Record<string, string> = {
     'Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name, Last-Event-ID',
   'Access-Control-Max-Age': '86400',
 };
-
-const DAY_MS = 86_400_000;
 
 /**
  * The merge Container. It runs the Python HTTP server (image default CMD); the
@@ -408,23 +413,24 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
         nowMs: Date.now(),
       });
       if (!v.ok) return jsonResponse({ error: v.error }, 400);
-      // Re-validate the slot server-side (anti double-book / tamper) with the SAME
-      // rules as /slots.json — never trust the client's posted time.
-      const obj = await env.AVAILCAL_BUCKET.get(PUBLIC_FREEBUSY_KEY);
-      const busy: Busy[] = obj ? await obj.json() : [];
+      // Re-validate the slot server-side (anti double-book / tamper) on the SHARED
+      // booking grid — never trust the client's posted time.
+      const feed = await loadPublicBusy(env.AVAILCAL_BUCKET, PUBLIC_FREEBUSY_KEY);
+      // Fail CLOSED. A missing feed used to mean `busy = []`, i.e. nothing is
+      // busy, so a booking would be written straight over a real meeting. On a
+      // write path, refusing to book beats booking blind.
+      if (!feed.ok) {
+        return jsonResponse({ error: 'Availability is unavailable right now — please try again shortly.' }, 503);
+      }
       const day = isoDate(Date.parse(v.booking.start));
-      const slotMin = Number(env.SCHEDULE_SLOT_MINUTES ?? '30') || 30;
       let bookable = false;
       try {
-        bookable = slotIsBookable(busy, {
-          fromDate: day, toDate: day,
-          tz: env.SCHEDULE_WORK_TZ || env.AVAILCAL_DEFAULT_TZ || 'America/New_York',
-          durationMin: slotMin, stepMin: slotMin,
-          workStart: env.SCHEDULE_WORK_START || '08:00',
-          workEnd: env.SCHEDULE_WORK_END || '18:00',
-          days: parseDays(env.SCHEDULE_DAYS || '1-5'),
-          nowMs: Date.now(), maxSlots: 2000,
-        }, v.booking.start, v.booking.end);
+        bookable = slotIsBookable(
+          feed.busy,
+          bookingSlotParams(scheduleConfig(env), day, day, Date.now()),
+          v.booking.start,
+          v.booking.end,
+        );
       } catch {
         bookable = false;
       }
@@ -581,24 +587,6 @@ function jsonResponse(body: unknown, status = 200, extra: Record<string, string>
   });
 }
 
-function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
-/**
- * Parse a YYYY-MM-DD calendar date as UTC midnight, or null if it is not a real
- * date. `Date.parse` alone is not enough: it returns NaN for `9999-99-99`, and
- * a NaN bound used to disable the range clamp rather than reject the request.
- * The round-trip through isoDate() rejects overflow forms (Feb 30, month 13).
- */
-function utcDateMs(s: string): number | null {
-  const t = s.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
-  const ms = Date.parse(t + 'T00:00:00Z');
-  if (!Number.isFinite(ms)) return null;
-  return isoDate(ms) === t ? ms : null;
-}
-
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
 }
@@ -709,24 +697,33 @@ async function handleChat(env: Env, ctx: ExecutionContext, payload: Record<strin
     return jsonResponse(body, 200);
   }
 
-  const obj = await env.AVAILCAL_BUCKET.get(PUBLIC_FREEBUSY_KEY);
-  const busy: Busy[] = obj ? await obj.json() : [];
-  const base = {
-    tz, durationMin,
-    workStart: env.SCHEDULE_WORK_START || '08:00', workEnd: env.SCHEDULE_WORK_END || '18:00',
-    days: parseDays(env.SCHEDULE_DAYS || '1-5'), nowMs: Date.now(),
-  };
+  const feed = await loadPublicBusy(env.AVAILCAL_BUCKET, PUBLIC_FREEBUSY_KEY);
+  // Fail CLOSED. An absent feed used to become `busy = []`, so the assistant
+  // would confidently propose times sitting on top of real meetings.
+  if (!feed.ok) {
+    return jsonResponse({ reply: "I can't see the calendar right now — please try again shortly.", proposed }, 200);
+  }
+  const busy = feed.busy;
+  const cfg = scheduleConfig(env);
+  const nowMs = Date.now();
 
   if (action.kind === 'propose') {
-    const from = action.fromDate && /^\d{4}-\d\d-\d\d$/.test(action.fromDate) ? action.fromDate : today;
-    const maxRange = Number(env.SCHEDULE_MAX_RANGE_DAYS ?? '62') || 62;
-    const fromMs = Date.parse(from + 'T00:00:00Z');
-    let to = action.toDate && /^\d{4}-\d\d-\d\d$/.test(action.toDate) ? action.toDate : isoDate(fromMs + 14 * DAY_MS);
-    if (Date.parse(to + 'T00:00:00Z') - fromMs > maxRange * DAY_MS) to = isoDate(fromMs + maxRange * DAY_MS);
-    const dur = action.durationMin && action.durationMin >= 5 && action.durationMin <= 480 ? action.durationMin : durationMin;
+    // The window comes from the model, so it can be nonsense; fall back to the
+    // default span rather than failing the turn.
+    const win = resolveWindow(cfg, action.fromDate ?? null, action.toDate ?? null, nowMs, 14)
+      ?? resolveWindow(cfg, null, null, nowMs, 14);
+    if (!win) return jsonResponse({ reply: action.reply || 'Which day works for you?', proposed }, 200);
     let ranked: Slot[] = [];
     try {
-      ranked = rankSlots(findSlots(busy, chatSlotParams({ ...base, durationMin: dur }, from, to)), { partOfDay: action.partOfDay, days: action.days, exclude: seen }, tz, 3);
+      // Propose on the BOOKING grid, never a model-chosen duration. POST /book
+      // re-validates against the owner's slot length, so any other grid could
+      // only ever produce times that are then rejected with 409.
+      ranked = rankSlots(
+        findSlots(busy, bookingSlotParams(cfg, win.fromDate, win.toDate, nowMs)),
+        { partOfDay: action.partOfDay, days: action.days, exclude: seen },
+        tz,
+        3,
+      );
     } catch { ranked = []; }
     return jsonResponse({ reply: formatProposedReply(action.reply ?? '', ranked, tz), proposed: ranked }, 200);
   }
@@ -737,7 +734,7 @@ async function handleChat(env: Env, ctx: ExecutionContext, payload: Record<strin
     if (!action.email) return jsonResponse({ reply: "Great — what's the best email for the invite?", proposed }, 200);
     const day = isoDate(Date.parse(pick.start));
     let okSlot = false;
-    try { okSlot = slotIsBookable(busy, chatSlotParams(base, day, day), pick.start, pick.end); } catch { okSlot = false; }
+    try { okSlot = slotIsBookable(busy, bookingSlotParams(cfg, day, day, nowMs), pick.start, pick.end); } catch { okSlot = false; }
     if (!okSlot) return jsonResponse({ reply: 'Ah — that time just filled up. Want a few more options?', proposed: [] }, 200);
     const v = validateBooking(
       { start: pick.start, end: pick.end, email: action.email, name: action.name ?? '', subject: env.BOOKING_TITLE ?? 'Meeting', meeting: action.meeting ?? 'teams' },
@@ -864,36 +861,20 @@ async function handleMcp(request: Request, env: Env, ctx: ExecutionContext): Pro
 async function handleSlots(url: URL, env: Env): Promise<Response> {
   const q = url.searchParams;
   const nowMs = Date.now();
+  const cfg = scheduleConfig(env);
   // Working hours are the OWNER's business hours, interpreted in a fixed
   // business timezone (env), NOT the viewer's. The viewer's tz only changes how
   // the resulting UTC slots are displayed (done client-side), so it isn't needed
   // for computation. `displayTz` is echoed back as a hint.
-  const workTz = env.SCHEDULE_WORK_TZ || env.AVAILCAL_DEFAULT_TZ || 'America/New_York';
-  const displayTz = q.get('tz') || workTz;
+  const displayTz = q.get('tz') || cfg.workTz;
 
-  const maxRange = Number(env.SCHEDULE_MAX_RANGE_DAYS ?? '62') || 62;
-  const todayMs = utcDateMs(isoDate(nowMs)) as number;
-
-  // Reject unparseable bounds instead of silently skipping the clamp. The old
-  // guard only clamped `if (Number.isFinite(fromMs) && Number.isFinite(toMs))`,
-  // so a regex-valid but calendar-invalid `to` (e.g. 9999-99-99) parsed to NaN,
-  // bypassed SCHEDULE_MAX_RANGE_DAYS entirely, and left computeSlots walking the
+  // Reject unparseable bounds instead of silently skipping the clamp. A
+  // regex-valid but calendar-invalid `to` (e.g. 9999-99-99) used to parse to NaN,
+  // bypass SCHEDULE_MAX_RANGE_DAYS entirely, and leave computeSlots walking the
   // day cursor for millennia on one unauthenticated GET.
-  const rawFrom = q.get('from');
-  const rawTo = q.get('to');
-  const parsedFrom = rawFrom === null ? todayMs : utcDateMs(rawFrom);
-  if (parsedFrom === null) return jsonResponse({ error: 'invalid "from": expected YYYY-MM-DD' }, 400);
-  const parsedTo = rawTo === null ? todayMs + 7 * DAY_MS : utcDateMs(rawTo);
-  if (parsedTo === null) return jsonResponse({ error: 'invalid "to": expected YYYY-MM-DD' }, 400);
-
-  // Never scan the past: computeSlots drops those candidates anyway (startMs <
-  // nowMs), so a far-past `from` changed nothing but the CPU bill.
-  const fromMs = Math.max(parsedFrom, todayMs);
-  let toMs = parsedTo;
-  if (toMs < fromMs) toMs = fromMs;
-  if (toMs - fromMs > maxRange * DAY_MS) toMs = fromMs + maxRange * DAY_MS;
-  const fromDate = isoDate(fromMs);
-  const toDate = isoDate(toMs);
+  const win = resolveWindow(cfg, q.get('from'), q.get('to'), nowMs, 7);
+  if (!win) return jsonResponse({ error: 'invalid "from"/"to": expected a real YYYY-MM-DD date' }, 400);
+  const { fromDate, toDate } = win;
 
   // Bounded, not merely positive: `step` drives candidates-per-day, so tiny or
   // fractional values were a cheap CPU amplifier. Out-of-range falls back to the
@@ -902,46 +883,37 @@ async function handleSlots(url: URL, env: Env): Promise<Response> {
     const n = Number(v);
     return v !== null && Number.isFinite(n) && n >= 5 && n <= 480 ? n : d;
   };
-  const durationMin = num(q.get('duration'), Number(env.SCHEDULE_SLOT_MINUTES ?? '30') || 30);
+  const durationMin = num(q.get('duration'), cfg.slotMinutes);
   const stepMin = num(q.get('step'), durationMin);
-  // Working hours come from env only (the owner controls them); default 08:00–18:00.
-  const workStart = env.SCHEDULE_WORK_START || '08:00';
-  const workEnd = env.SCHEDULE_WORK_END || '18:00';
 
-  const obj = await env.AVAILCAL_BUCKET.get(PUBLIC_FREEBUSY_KEY);
   // Fail CLOSED. A missing object used to become `busy = []`, i.e. every working
   // hour advertised as free — the dangerous direction, and reachable whenever the
   // merge job hasn't run yet or the public feed isn't enabled (it is off by
   // default). Better to say "unknown" than to invite bookings over real meetings.
-  if (!obj) {
+  const feed = await loadPublicBusy(env.AVAILCAL_BUCKET, PUBLIC_FREEBUSY_KEY);
+  if (!feed.ok) {
     return jsonResponse({ error: 'availability is not published yet' }, 503, { 'Cache-Control': 'no-store' });
   }
-  const busy: Busy[] = await obj.json();
+  const busy = feed.busy;
 
   try {
-    // A caller may NARROW the owner's bookable weekdays, never widen them. This
-    // was `q.get('days') || env.SCHEDULE_DAYS`, so ?days=0-6 advertised weekend
-    // slots the owner never offered — which POST /book then rejected with 409,
-    // because it re-validates against env alone.
-    const ownerDays = parseDays(env.SCHEDULE_DAYS || '1-5');
+    // A caller may NARROW the owner's bookable weekdays, never widen them.
     const requestedDays = q.get('days');
-    const days = requestedDays === null
-      ? ownerDays
-      : parseDays(requestedDays).filter((d) => ownerDays.includes(d));
+    const { days } = narrowDays(cfg, requestedDays === null ? null : parseDays(requestedDays));
     const slots = computeSlots(busy, {
       fromDate,
       toDate,
-      tz: workTz, // working hours interpreted in the business timezone
+      tz: cfg.workTz, // working hours interpreted in the business timezone
       durationMin,
       stepMin,
-      workStart,
-      workEnd,
+      workStart: cfg.workStart,
+      workEnd: cfg.workEnd,
       days,
       nowMs,
       maxSlots: 2000,
     });
     return jsonResponse(
-      { tz: displayTz, workTz, from: fromDate, to: toDate, durationMin, slots },
+      { tz: displayTz, workTz: cfg.workTz, from: fromDate, to: toDate, durationMin, slots },
       200,
       { 'Cache-Control': 'public, max-age=60' },
     );
