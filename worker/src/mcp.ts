@@ -19,53 +19,28 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { rankSlots } from './chat';
-import { type Busy, type Slot, computeSlots, parseDays } from './slots';
+import {
+  type ScheduleConfig,
+  type ScheduleEnv,
+  bookingSlotParams,
+  isoDate,
+  narrowDays,
+  resolveWindow,
+  scheduleConfig,
+  utcDateMs,
+} from './schedule-config';
+import { type Busy, type Slot, computeSlots } from './slots';
 import { slotIsBookable } from './scheduling';
 
-/** Env subset this module reads. Mirrors the defaults handleSlots applies. */
-export interface McpEnv {
-  OWNER_NAME?: string;
-  PUBLIC_FEED_HOST?: string;
-  SCHEDULE_WORK_TZ?: string;
-  AVAILCAL_DEFAULT_TZ?: string;
-  SCHEDULE_WORK_START?: string;
-  SCHEDULE_WORK_END?: string;
-  SCHEDULE_DAYS?: string;
-  SCHEDULE_SLOT_MINUTES?: string;
-  SCHEDULE_MAX_RANGE_DAYS?: string;
-  MCP_ENABLED?: string;
-}
-
-export interface ScheduleConfig {
-  ownerName: string;
-  workTz: string;
-  workStart: string;
-  workEnd: string;
-  days: number[];
-  slotMinutes: number;
-  maxRangeDays: number;
-  bookUrl: string;
-}
-
-/** Owner policy from env. Deliberately the ONLY source of working hours. */
-export function scheduleConfig(env: McpEnv): ScheduleConfig {
-  const host = (env.PUBLIC_FEED_HOST ?? '').trim();
-  return {
-    ownerName: (env.OWNER_NAME ?? '').trim() || 'the owner',
-    workTz: env.SCHEDULE_WORK_TZ || env.AVAILCAL_DEFAULT_TZ || 'America/New_York',
-    workStart: env.SCHEDULE_WORK_START || '08:00',
-    workEnd: env.SCHEDULE_WORK_END || '18:00',
-    days: parseDays(env.SCHEDULE_DAYS || '1-5'),
-    slotMinutes: Number(env.SCHEDULE_SLOT_MINUTES ?? '30') || 30,
-    maxRangeDays: Number(env.SCHEDULE_MAX_RANGE_DAYS ?? '62') || 62,
-    bookUrl: host ? `https://${host}/book` : '/book',
-  };
-}
+// Owner policy, the booking grid and the date helpers live in ./schedule-config
+// so /slots.json, /chat, POST /book and this module cannot drift apart. Re-exported
+// here because the tools and their tests are written against them.
+export type McpEnv = ScheduleEnv;
+export { type ScheduleConfig, scheduleConfig, utcDateMs };
 
 export const MCP_SERVER_NAME = 'availcal';
 export const MAX_RESULTS_DEFAULT = 10;
 export const MAX_RESULTS_CEILING = 50;
-const DAY_MS = 86_400_000;
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /** Context a tool body needs. Injected so tests need no Worker globals. */
@@ -80,17 +55,6 @@ export interface ToolCtx {
    * report an error rather than treating "no busy data" as "everything is free".
    */
   dataUnavailable?: boolean;
-}
-
-const isoDate = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-
-/** YYYY-MM-DD as UTC midnight, or null when it is not a real calendar date. */
-export function utcDateMs(s: string): number | null {
-  const t = s.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
-  const ms = Date.parse(t + 'T00:00:00Z');
-  if (!Number.isFinite(ms)) return null;
-  return isoDate(ms) === t ? ms : null;
 }
 
 /** True when `tz` is a timezone this runtime actually knows. */
@@ -132,22 +96,6 @@ function businessParts(iso: string, tz: string): { date: string; weekday: number
   return { date: `${p.year}-${p.month}-${p.day}`, weekday: idx };
 }
 
-/** The params /book re-validates against; MCP must match it exactly. */
-function bookingParams(cfg: ScheduleConfig, fromDate: string, toDate: string, nowMs: number) {
-  return {
-    fromDate,
-    toDate,
-    tz: cfg.workTz,
-    durationMin: cfg.slotMinutes,
-    stepMin: cfg.slotMinutes,
-    workStart: cfg.workStart,
-    workEnd: cfg.workEnd,
-    days: cfg.days,
-    nowMs,
-    maxSlots: 2000,
-  };
-}
-
 export interface ListArgs {
   from_date?: string;
   to_date?: string;
@@ -164,37 +112,22 @@ export class ToolInputError extends Error {}
 /** list_open_slots — the only bookable times, computed server-side. */
 export function listOpenSlots(args: ListArgs, ctx: ToolCtx) {
   const { cfg } = ctx;
-  const todayMs = utcDateMs(isoDate(ctx.nowMs)) as number;
-
-  const parsedFrom = args.from_date === undefined ? todayMs : utcDateMs(args.from_date);
-  if (parsedFrom === null) throw new ToolInputError('from_date must be a real calendar date (YYYY-MM-DD).');
-  const parsedTo = args.to_date === undefined ? todayMs + 7 * DAY_MS : utcDateMs(args.to_date);
-  if (parsedTo === null) throw new ToolInputError('to_date must be a real calendar date (YYYY-MM-DD).');
-
-  const fromMs = Math.max(parsedFrom, todayMs); // never scan the past
-  let toMs = parsedTo;
-  if (toMs < fromMs) toMs = fromMs;
-  let rangeClamped = false;
-  if (toMs - fromMs > cfg.maxRangeDays * DAY_MS) {
-    toMs = fromMs + cfg.maxRangeDays * DAY_MS;
-    rangeClamped = true;
-  }
-  const fromDate = isoDate(fromMs);
-  const toDate = isoDate(toMs);
+  // Same window + weekday rules as /slots.json, /chat and POST /book.
+  const win = resolveWindow(cfg, args.from_date ?? null, args.to_date ?? null, ctx.nowMs, 7);
+  if (!win) throw new ToolInputError('from_date and to_date must be real calendar dates (YYYY-MM-DD).');
+  const { fromDate, toDate } = win;
 
   // Weekdays NARROW the owner's set; they can never widen it.
   const notices: string[] = [];
-  let days = cfg.days;
-  if (args.weekdays && args.weekdays.length) {
-    days = args.weekdays.filter((d) => cfg.days.includes(d));
-    if (days.length !== args.weekdays.length) {
-      notices.push('Some requested weekdays are outside the owner’s bookable days and were ignored.');
-    }
-    if (!days.length) {
-      notices.push('None of the requested weekdays are bookable; no times can match.');
-    }
+  const narrowed = narrowDays(cfg, args.weekdays);
+  const days = narrowed.days;
+  if (narrowed.dropped) {
+    notices.push('Some requested weekdays are outside the owner’s bookable days and were ignored.');
   }
-  if (rangeClamped) {
+  if (args.weekdays?.length && !days.length) {
+    notices.push('None of the requested weekdays are bookable; no times can match.');
+  }
+  if (win.clamped) {
     notices.push(`Requested window exceeded the ${cfg.maxRangeDays}-day limit and was searched only to ${toDate}.`);
   }
 
@@ -210,7 +143,7 @@ export function listOpenSlots(args: ListArgs, ctx: ToolCtx) {
 
   const limit = Math.min(Math.max(args.max_results ?? MAX_RESULTS_DEFAULT, 1), MAX_RESULTS_CEILING);
   const all: Slot[] = days.length
-    ? computeSlots(ctx.busy, { ...bookingParams(cfg, fromDate, toDate, ctx.nowMs), days })
+    ? computeSlots(ctx.busy, { ...bookingSlotParams(cfg, fromDate, toDate, ctx.nowMs), days })
     : [];
 
   // Cursor is exact and stateless: continue strictly after the given instant.
@@ -289,7 +222,7 @@ export function checkSlotAvailable(
   if (startMs < ctx.nowMs) {
     reason = 'in_the_past';
   } else {
-    const params = bookingParams(cfg, day, day, ctx.nowMs);
+    const params = bookingSlotParams(cfg, day, day, ctx.nowMs);
     // Authoritative answer — the SAME guard POST /book applies.
     const bookable = slotIsBookable(ctx.busy, params, startIso, endIso);
     if (bookable) {
