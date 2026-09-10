@@ -197,6 +197,87 @@ export function listOpenSlots(args: ListArgs, ctx: ToolCtx) {
   };
 }
 
+export interface BusyArgs {
+  from_date?: string;
+  to_date?: string;
+  max_results?: number;
+  starting_after_utc?: string;
+  display_timezone?: string;
+}
+
+/**
+ * list_busy_blocks — WHEN the owner is occupied, across the full 24 hours.
+ *
+ * Deliberately NOT filtered by working hours or bookable weekdays: this is the
+ * scheduled picture, not the bookable one. That is the same anonymized data the
+ * public feed already serves token-free at /freebusy.json (the merge job unions
+ * every source with no time-of-day filter), so it discloses nothing new — but it
+ * shows only WHEN, never what the meeting is or which calendar it came from:
+ * titles, locations and attendees are discarded at ingestion, and source labels
+ * are erased by flatten_across_sources before the feed is written.
+ *
+ * Output fields are constructed explicitly rather than spread, so a label could
+ * not ride along even if this were ever pointed at the labeled private feed.
+ */
+export function listBusyBlocks(args: BusyArgs, ctx: ToolCtx) {
+  const { cfg } = ctx;
+  const win = resolveWindow(cfg, args.from_date ?? null, args.to_date ?? null, ctx.nowMs, 7);
+  if (!win) throw new ToolInputError('from_date and to_date must be real calendar dates (YYYY-MM-DD).');
+
+  const displayTz = args.display_timezone && validTimezone(args.display_timezone)
+    ? args.display_timezone
+    : cfg.workTz;
+  const notices: string[] = [];
+  if (args.display_timezone && displayTz !== args.display_timezone) {
+    notices.push('The requested display timezone was not recognised; times are shown in the business timezone.');
+  }
+  if (win.clamped) {
+    notices.push(`Requested window exceeded the ${cfg.maxRangeDays}-day limit and was searched only to ${win.toDate}.`);
+  }
+
+  // Window bounds as instants: a block counts if it OVERLAPS the window at all,
+  // so a meeting spanning midnight into the range is not silently dropped.
+  const fromMs = Date.parse(win.fromDate + 'T00:00:00Z');
+  const toMs = Date.parse(win.toDate + 'T00:00:00Z') + 86_400_000;
+  const afterMs = args.starting_after_utc ? Date.parse(args.starting_after_utc) : NaN;
+
+  const inRange = ctx.busy
+    .map((b) => ({ s: Date.parse(b.start), e: Date.parse(b.end) }))
+    .filter((b) => Number.isFinite(b.s) && Number.isFinite(b.e) && b.e > b.s)
+    .filter((b) => b.s < toMs && b.e > fromMs)
+    .filter((b) => (Number.isFinite(afterMs) ? b.s > afterMs : true))
+    .sort((a, b) => a.s - b.s);
+
+  const limit = Math.min(Math.max(args.max_results ?? MAX_RESULTS_DEFAULT, 1), MAX_RESULTS_CEILING);
+  const page = inRange.slice(0, limit);
+  const truncated = inRange.length > limit;
+
+  return {
+    business_timezone: cfg.workTz,
+    display_timezone: displayTz,
+    query: { from_date: win.fromDate, to_date: win.toDate, hours: 'all' as const },
+    blocks: page.map((b) => {
+      const startIso = new Date(b.s).toISOString();
+      const endIso = new Date(b.e).toISOString();
+      const bp = businessParts(startIso, cfg.workTz);
+      return {
+        start_utc: startIso,
+        end_utc: endIso,
+        start_display: display(startIso, displayTz),
+        end_display: display(endIso, displayTz),
+        business_date: bp.date,
+        business_weekday: bp.weekday,
+        minutes: Math.round((b.e - b.s) / 60_000),
+      };
+    }),
+    returned: page.length,
+    truncated,
+    next_cursor: truncated && page.length ? new Date(page[page.length - 1].s).toISOString() : null,
+    availability_as_of_utc: ctx.asOf ?? null,
+    notices,
+  };
+}
+
 export type SlotReason = 'free' | 'busy' | 'outside_working_hours' | 'in_the_past';
 
 /** check_slot_available — re-verify one instant before committing to it. */
@@ -292,6 +373,28 @@ export function renderSlotsText(r: ReturnType<typeof listOpenSlots>): string {
     note,
     '',
     'These are the only open times in the searched window — do not offer any other time.',
+  ].filter(Boolean).join('\n');
+}
+
+/** Text block for list_busy_blocks, derived from the SAME object as the JSON. */
+export function renderBusyText(r: ReturnType<typeof listBusyBlocks>): string {
+  if (!r.blocks.length) {
+    return `Nothing scheduled between ${r.query.from_date} and ${r.query.to_date}.` +
+      (r.notices.length ? ' ' + r.notices.join(' ') : '');
+  }
+  const lines = r.blocks.map((b, i) => `${i + 1}. ${b.start_display} – ${b.end_display} (${b.minutes} min)  [${b.start_utc}]`);
+  const more = r.truncated && r.next_cursor
+    ? `\nMore blocks exist. Call list_busy_blocks again with starting_after_utc="${r.next_cursor}".`
+    : '';
+  return [
+    `${r.returned} scheduled block(s), across the full day (not limited to working hours).`,
+    `Shown in ${r.display_timezone}; the owner's business timezone is ${r.business_timezone}.`,
+    '',
+    lines.join('\n'),
+    more,
+    r.notices.length ? r.notices.join(' ') : '',
+    '',
+    'These are busy periods only — no titles, no participants, and no indication of which calendar each came from.',
   ].filter(Boolean).join('\n');
 }
 
@@ -404,6 +507,43 @@ export function createMcpServer(ctx: ToolCtx): McpServer {
           : `Not available (${r.reason}). ${r.start_display} (${r.start_utc}) cannot be booked. ` +
             'Call list_open_slots for current openings.';
         return { content: [{ type: 'text' as const, text }], structuredContent: r };
+      } catch (e) {
+        return toolError(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'list_busy_blocks',
+    {
+      title: 'See what is scheduled',
+      description:
+        `When ${cfg.ownerName} is occupied, across the FULL 24 hours — not limited to working hours or ` +
+        'bookable weekdays, so it includes evenings, nights and weekends. Use this to understand what the ' +
+        'schedule actually looks like; use list_open_slots instead when you need a time that can be booked ' +
+        '(a gap here is not necessarily bookable — bookable times are only those inside working hours). ' +
+        'Returns busy periods ONLY: no titles, no participants, no locations, and no indication of which ' +
+        'calendar a block came from — that information is not available to this server. Never infer or ' +
+        'invent what a block is about.',
+      inputSchema: z.object({
+        from_date: z.string().optional()
+          .describe('First date (YYYY-MM-DD) in the owner’s business timezone. Defaults to today.'),
+        to_date: z.string().optional()
+          .describe(`Last date, inclusive. Defaults to 7 days out. Clamped to ${cfg.maxRangeDays} days.`),
+        max_results: z.number().int().min(1).max(MAX_RESULTS_CEILING).optional()
+          .describe(`Maximum blocks to return (default ${MAX_RESULTS_DEFAULT}, max ${MAX_RESULTS_CEILING}).`),
+        starting_after_utc: z.string().optional()
+          .describe('Pagination cursor. Pass next_cursor from a previous truncated result.'),
+        display_timezone: z.string().optional()
+          .describe('IANA name used ONLY to render display strings.'),
+      }),
+      annotations: READ_ONLY,
+    },
+    async (args) => {
+      if (ctx.dataUnavailable) return UNAVAILABLE;
+      try {
+        const r = listBusyBlocks(args as BusyArgs, ctx);
+        return { content: [{ type: 'text' as const, text: renderBusyText(r) }], structuredContent: r };
       } catch (e) {
         return toolError(e);
       }
