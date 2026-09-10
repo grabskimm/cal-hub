@@ -231,12 +231,19 @@ Private host (token-gated, on `availcal.<domain>`):
 
 | Param | Default | Meaning |
 | --- | --- | --- |
-| `from` / `to` | today / +7d | date range (YYYY-MM-DD), clamped to `SCHEDULE_MAX_RANGE_DAYS` |
-| `tz` | `AVAILCAL_DEFAULT_TZ` | IANA timezone the working hours are interpreted in |
-| `duration` | `SCHEDULE_SLOT_MINUTES` | slot length in minutes |
-| `step` | = `duration` | gap between slot starts |
-| `workStart` / `workEnd` | `SCHEDULE_WORK_START/END` | working hours, local `HH:MM` |
-| `days` | `SCHEDULE_DAYS` | allowed weekdays, e.g. `1-5` (0=Sun) |
+| `from` / `to` | today / +7d | date range (YYYY-MM-DD), clamped to `SCHEDULE_MAX_RANGE_DAYS`. A date that is not a real calendar date is rejected with `400`; `from` earlier than today is treated as today |
+| `tz` | `SCHEDULE_WORK_TZ` | **display hint only** — echoed back so the page can render times. Working hours are always computed in `SCHEDULE_WORK_TZ`; this does not change which slots are free |
+| `duration` | `SCHEDULE_SLOT_MINUTES` | slot length in minutes (5–480; outside that range falls back to the default) |
+| `step` | = `duration` | gap between slot starts (5–480) |
+| `days` | `SCHEDULE_DAYS` | **narrows** the owner's bookable weekdays, e.g. `1-5` (0=Sun). It can never widen them — `POST /book` re-validates against `SCHEDULE_DAYS` alone, so an offer outside owner policy would be rejected at booking time |
+
+Working hours (`SCHEDULE_WORK_START` / `SCHEDULE_WORK_END`) are **owner-controlled
+via env only** and are deliberately not query params — they are the projection
+window that keeps out-of-hours time private.
+
+If the anonymized feed has not been published yet (merge job not yet run, or
+`AVAILCAL_EMIT_PUBLIC` off), `/slots.json` returns `503` rather than an empty
+busy list, so a missing feed can never read as "completely free".
 
 Response: `{ "tz", "from", "to", "durationMin", "slots": [{"start","end"}] }`,
 slot times in UTC. Slot computation handles DST correctly (unit-tested in
@@ -253,6 +260,24 @@ const { slots } = await r.json();   // [{ start: '2026-06-24T13:00:00.000Z', end
 > windows (not the contents). It's anonymized — no titles, names, or source
 > count — but the time windows themselves are visible. Leave it off unless you
 > want that.
+
+### MCP endpoint for AI agents (optional)
+
+`POST /mcp` on the public host exposes the same anonymized availability to MCP
+clients (Claude Code, Claude.ai connectors) as three read-only tools:
+`list_open_slots`, `check_slot_available`, `get_scheduling_policy`. It is
+token-free because it discloses nothing that `/slots.json` does not already serve
+publicly, and it cannot book — a person still completes booking on `/book`.
+
+Toggle it with the `MCP_ENABLED` var in `wrangler.jsonc` (`"false"` disables the
+route entirely). Connect with:
+
+```bash
+claude mcp add --transport http availcal https://<PUBLIC_FEED_HOST>/mcp
+```
+
+See [`docs/MCP.md`](../docs/MCP.md) for the tool schemas, the timezone contract,
+and the rationale for the auth and Origin decisions.
 
 ### Booking (provider-agnostic, read-only)
 

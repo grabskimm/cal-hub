@@ -1,0 +1,275 @@
+import { readFileSync } from 'node:fs';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  type ScheduleConfig,
+  type ToolCtx,
+  checkSlotAvailable,
+  listOpenSlots,
+  renderSlotsText,
+  scheduleConfig,
+  schedulingPolicy,
+  utcDateMs,
+  validTimezone,
+} from '../src/mcp';
+import { type Busy } from '../src/slots';
+
+const NOW = Date.parse('2026-06-22T00:00:00Z'); // a Monday
+
+const CFG: ScheduleConfig = {
+  ownerName: 'Mendel',
+  workTz: 'America/New_York',
+  workStart: '09:00',
+  workEnd: '12:00',
+  days: [1, 2, 3, 4, 5],
+  slotMinutes: 30,
+  maxRangeDays: 62,
+  bookUrl: 'https://availability.example/book',
+};
+
+const ctx = (over: Partial<ToolCtx> = {}): ToolCtx => ({
+  cfg: CFG,
+  busy: [],
+  nowMs: NOW,
+  ...over,
+});
+
+describe('scheduleConfig', () => {
+  it('applies the same owner defaults as /slots.json', () => {
+    const c = scheduleConfig({});
+    expect(c.workTz).toBe('America/New_York');
+    expect(c.workStart).toBe('08:00');
+    expect(c.workEnd).toBe('18:00');
+    expect(c.days).toEqual([1, 2, 3, 4, 5]);
+    expect(c.slotMinutes).toBe(30);
+    expect(c.maxRangeDays).toBe(62);
+  });
+});
+
+describe('list_open_slots', () => {
+  it('returns UTC instants inside the owner working hours', () => {
+    const r = listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx());
+    // 09:00-12:00 EDT (-4) at 30min = 6 slots, starting 13:00Z.
+    expect(r.slots.map((s) => s.start_utc)).toEqual([
+      '2026-06-22T13:00:00.000Z',
+      '2026-06-22T13:30:00.000Z',
+      '2026-06-22T14:00:00.000Z',
+      '2026-06-22T14:30:00.000Z',
+      '2026-06-22T15:00:00.000Z',
+      '2026-06-22T15:30:00.000Z',
+    ]);
+    expect(r.business_timezone).toBe('America/New_York');
+    // business_date/weekday are in the OWNER's zone, not UTC.
+    expect(r.slots[0].business_date).toBe('2026-06-22');
+    expect(r.slots[0].business_weekday).toBe(1);
+  });
+
+  it('removes slots overlapping a busy block', () => {
+    const busy: Busy[] = [{ start: '2026-06-22T13:00:00Z', end: '2026-06-22T14:00:00Z' }];
+    const r = listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx({ busy }));
+    expect(r.slots.map((s) => s.start_utc)).not.toContain('2026-06-22T13:00:00.000Z');
+    expect(r.slots).toHaveLength(4);
+  });
+
+  it('NARROWS the owner weekdays and never widens them', () => {
+    // Sunday (0) is not bookable; asking for it must not produce weekend slots.
+    const r = listOpenSlots(
+      { from_date: '2026-06-21', to_date: '2026-06-27', weekdays: [0, 6] },
+      ctx(),
+    );
+    expect(r.query.weekdays).toEqual([]);
+    expect(r.slots).toEqual([]);
+    expect(r.notices.join(' ')).toMatch(/outside the owner/i);
+  });
+
+  it('intersects a partially-valid weekday request', () => {
+    const r = listOpenSlots(
+      { from_date: '2026-06-22', to_date: '2026-06-26', weekdays: [1, 6] },
+      ctx(),
+    );
+    expect(r.query.weekdays).toEqual([1]);
+    expect(r.slots.every((s) => s.business_weekday === 1)).toBe(true);
+  });
+
+  it('clamps an over-long window and says so', () => {
+    const r = listOpenSlots({ from_date: '2026-06-22', to_date: '2027-06-22' }, ctx());
+    expect(r.query.to_date).toBe('2026-08-23'); // +62d
+    expect(r.notices.join(' ')).toMatch(/62-day limit/);
+  });
+
+  it('rejects a calendar-invalid date as a tool error', () => {
+    expect(() => listOpenSlots({ to_date: '9999-99-99' }, ctx())).toThrow(/real calendar date/);
+    expect(() => listOpenSlots({ from_date: '2026-02-30' }, ctx())).toThrow(/real calendar date/);
+  });
+
+  it('never scans the past', () => {
+    const r = listOpenSlots({ from_date: '2020-01-01', to_date: '2026-06-22' }, ctx());
+    expect(r.query.from_date).toBe('2026-06-22');
+  });
+
+  it('paginates with an exact cursor and flags truncation', () => {
+    const first = listOpenSlots(
+      { from_date: '2026-06-22', to_date: '2026-06-22', max_results: 2 },
+      ctx(),
+    );
+    expect(first.returned).toBe(2);
+    expect(first.truncated).toBe(true);
+    expect(first.next_cursor).toBe('2026-06-22T13:30:00.000Z');
+
+    const second = listOpenSlots(
+      { from_date: '2026-06-22', to_date: '2026-06-22', max_results: 2, starting_after_utc: first.next_cursor! },
+      ctx(),
+    );
+    expect(second.slots[0].start_utc).toBe('2026-06-22T14:00:00.000Z');
+  });
+
+  it('filters part_of_day in the OWNER timezone', () => {
+    // 09:00-12:00 EDT is entirely "morning" by the owner's clock, even though
+    // the UTC hours (13:00-16:00) would read as afternoon.
+    const morning = listOpenSlots(
+      { from_date: '2026-06-22', to_date: '2026-06-22', part_of_day: 'morning' },
+      ctx(),
+    );
+    expect(morning.slots).toHaveLength(6);
+    const evening = listOpenSlots(
+      { from_date: '2026-06-22', to_date: '2026-06-22', part_of_day: 'evening' },
+      ctx(),
+    );
+    expect(evening.slots).toHaveLength(0);
+  });
+
+  it('falls back on an unknown display timezone instead of echoing it', () => {
+    const r = listOpenSlots({ from_date: '2026-06-22', display_timezone: 'Mars/Olympus' }, ctx());
+    expect(r.display_timezone).toBe('America/New_York');
+    expect(r.display_timezone_source).toBe('fallback_business');
+  });
+});
+
+describe('check_slot_available', () => {
+  const day = { from: '2026-06-22' };
+  it('confirms a free slot', () => {
+    const r = checkSlotAvailable({ start_utc: '2026-06-22T13:00:00.000Z' }, ctx());
+    expect(r.available).toBe(true);
+    expect(r.reason).toBe('free');
+  });
+
+  it('reports a taken slot as busy, not as off-grid', () => {
+    const busy: Busy[] = [{ start: '2026-06-22T13:00:00Z', end: '2026-06-22T14:00:00Z' }];
+    const r = checkSlotAvailable({ start_utc: '2026-06-22T13:00:00.000Z' }, ctx({ busy }));
+    expect(r.available).toBe(false);
+    expect(r.reason).toBe('busy');
+  });
+
+  it('reports a time outside working hours', () => {
+    const r = checkSlotAvailable({ start_utc: '2026-06-22T03:00:00.000Z' }, ctx());
+    expect(r.available).toBe(false);
+    expect(r.reason).toBe('outside_working_hours');
+  });
+
+  it('reports a past instant', () => {
+    const r = checkSlotAvailable({ start_utc: '2020-01-01T13:00:00.000Z' }, ctx());
+    expect(r.reason).toBe('in_the_past');
+  });
+
+  it('rejects a non-instant argument', () => {
+    expect(() => checkSlotAvailable({ start_utc: 'next tuesday' }, ctx())).toThrow(/UTC ISO/);
+  });
+
+  void day;
+});
+
+describe('get_scheduling_policy', () => {
+  it('reports owner policy and states it cannot book', () => {
+    const r = schedulingPolicy(ctx());
+    expect(r.bookable_weekday_names).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+    expect(r.meeting_length_minutes).toBe(30);
+    expect(r.booking.note).toMatch(/cannot book/i);
+  });
+});
+
+// --- privacy -------------------------------------------------------------
+// The public feed is a bare [{start,end}] array. If anyone ever re-points this
+// module at the LABELED merged/busy.json, these fail loudly.
+describe('privacy: no per-source label can reach a tool result', () => {
+  const LEAKY = [
+    {
+      start: '2026-06-22T13:00:00Z',
+      end: '2026-06-22T14:00:00Z',
+      source: 'clientacme',
+      status: 'busy',
+      summary: 'Board review',
+      attendees: ['ceo@acme.example'],
+      location: 'HQ 12F',
+      uid: 'abc-123',
+    },
+  ] as unknown as Busy[];
+  // Values that must never appear anywhere in any rendering.
+  const SECRET_VALUES = ['clientacme', 'Board review', 'ceo@acme.example', 'HQ 12F', 'abc-123'];
+  // Key names, matched in JSON-quoted form so a legitimate field that merely
+  // ENDS in one of them (display_timezone_source) is not a false positive.
+  const SECRET_KEYS = ['"source"', '"summary"', '"attendees"', '"location"', '"uid"', '"status"'];
+
+  it('leaks nothing from a labeled busy fixture', () => {
+    const c = ctx({ busy: LEAKY });
+    const json = [
+      JSON.stringify(listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, c)),
+      JSON.stringify(checkSlotAvailable({ start_utc: '2026-06-22T13:00:00.000Z' }, c)),
+      JSON.stringify(schedulingPolicy(c)),
+    ].join('\n');
+    const blobs = json + '\n' + renderSlotsText(listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, c));
+    for (const secret of SECRET_VALUES) expect(blobs).not.toContain(secret);
+    for (const key of SECRET_KEYS) expect(json).not.toContain(key);
+  });
+
+  it('emits an exact whitelist of slot keys', () => {
+    const r = listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx());
+    expect(Object.keys(r.slots[0]).sort()).toEqual([
+      'business_date',
+      'business_weekday',
+      'end_display',
+      'end_utc',
+      'start_display',
+      'start_utc',
+    ]);
+  });
+
+  it('never names the private labeled feed', () => {
+    const src = readFileSync(new URL('../src/mcp.ts', import.meta.url), 'utf8');
+    // A quoted literal would mean real code reaching for the private feed; the
+    // module's prose may still name it when explaining why it is off limits.
+    expect(src).not.toMatch(/['"`]merged\//);
+    expect(src).not.toContain('MERGED_BUSY_KEY');
+  });
+});
+
+describe('helpers', () => {
+  it('utcDateMs rejects overflow dates', () => {
+    expect(utcDateMs('2026-06-22')).toBe(Date.parse('2026-06-22T00:00:00Z'));
+    expect(utcDateMs('9999-99-99')).toBeNull();
+    expect(utcDateMs('2026-02-30')).toBeNull();
+    expect(utcDateMs('nonsense')).toBeNull();
+  });
+  it('validTimezone distinguishes real zones', () => {
+    expect(validTimezone('Europe/Berlin')).toBe(true);
+    expect(validTimezone('Mars/Olympus')).toBe(false);
+  });
+});
+
+describe('rendering', () => {
+  it('pairs each display string with its authoritative UTC instant', () => {
+    const r = listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22', max_results: 2 }, ctx());
+    const text = renderSlotsText(r);
+    expect(text).toContain('[2026-06-22T13:00:00.000Z]');
+    expect(text).toMatch(/only open times/);
+    expect(text).toContain('starting_after_utc');
+  });
+
+  it('explains an empty result instead of returning a bare list', () => {
+    const busy: Busy[] = [{ start: '2026-06-22T00:00:00Z', end: '2026-06-23T00:00:00Z' }];
+    const text = renderSlotsText(
+      listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx({ busy })),
+    );
+    expect(text).toMatch(/No open times/);
+  });
+});
