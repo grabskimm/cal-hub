@@ -7,6 +7,9 @@ anything.
 
 - **URL** — `https://<PUBLIC_FEED_HOST>/mcp` (e.g. `https://availability.mendelg.tech/mcp`)
 - **Transport** — Streamable HTTP, `POST` only. `GET`/`DELETE` return `405`.
+  `Accept` **must** include `text/event-stream`; `application/json` alone is
+  refused with `406` and a JSON-RPC `-32000`. Responses are SSE-framed even for a
+  single reply, so strip the `data: ` prefix before parsing.
 - **Auth** — none. See [Why no auth](#why-no-auth).
 - **Enable/disable** — the `MCP_ENABLED` var in `worker/wrangler.jsonc`. Set it
   to `"false"` and redeploy to turn the endpoint off; the route stops matching
@@ -41,6 +44,37 @@ curl -sS https://availability.mendelg.tech/mcp \
 | `list_busy_blocks` | What is **scheduled**, across the full 24 hours |
 | `check_slot_available` | Re-verify one instant before committing to it |
 | `get_scheduling_policy` | Working hours, timezone, weekdays, meeting length, booking URL |
+
+> **If your client shows an old tool set** (e.g. `toolCount: 3`, no
+> `list_busy_blocks`) even after reconnecting: clients cache `tools/list`, and
+> several key that cache on `serverInfo`. Check which build you are talking to —
+> `initialize` should report `{"name":"availcal","version":"1.1.0"}`. If it
+> reports `1.0.0`, the client is serving a cached manifest and needs its entry
+> removed and re-added (not just refreshed). Verify the server directly with:
+>
+> ```bash
+> # NOTE the sed: responses are SSE-framed ("event: message\ndata: {...}"), so
+> # piping straight into jq fails with "Invalid numeric literal at line 1,
+> # column 6" — that is jq hitting the ':' in 'event:', NOT a server error.
+> curl -sS https://<PUBLIC_FEED_HOST>/mcp \
+>   -H 'Content-Type: application/json' \
+>   -H 'Accept: application/json, text/event-stream' \
+>   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+>   | sed -n 's/^data: //p' | jq -r '.result.tools[].name'
+> ```
+>
+> And to see which build is answering:
+>
+> ```bash
+> curl -sS https://<PUBLIC_FEED_HOST>/mcp \
+>   -H 'Content-Type: application/json' \
+>   -H 'Accept: application/json, text/event-stream' \
+>   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}' \
+>   | sed -n 's/^data: //p' | jq -c '.result.serverInfo'
+> ```
+>
+> The server version is bumped whenever the tool set changes, for exactly this
+> reason.
 
 > **If a client only ever returns working-hours results**, it is calling
 > `list_open_slots`. Ask for `list_busy_blocks` by name. The server's own

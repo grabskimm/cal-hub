@@ -39,6 +39,13 @@ export type McpEnv = ScheduleEnv;
 export { type ScheduleConfig, scheduleConfig, utcDateMs };
 
 export const MCP_SERVER_NAME = 'availcal';
+/**
+ * Advertised in the initialize response. BUMP THIS whenever the tool set
+ * changes: clients cache tools/list, and several key that cache on serverInfo,
+ * so a stale version leaves a client showing an old tool set indefinitely even
+ * after it re-reads the instructions. 1.1.0 = list_busy_blocks added.
+ */
+export const MCP_SERVER_VERSION = '1.1.0';
 export const MAX_RESULTS_DEFAULT = 10;
 export const MAX_RESULTS_CEILING = 50;
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -440,7 +447,7 @@ const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: 
 export function createMcpServer(ctx: ToolCtx): McpServer {
   const { cfg } = ctx;
   const server = new McpServer(
-    { name: MCP_SERVER_NAME, version: '1.0.0' },
+    { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
     { instructions: INSTRUCTIONS },
   );
 
