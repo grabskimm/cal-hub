@@ -52,6 +52,13 @@
 
   // Non-secret config. Secrets (tokens, feed URLs, R2 creds) are set with
   // `wrangler secret put` — see worker/README.md.
+  // Per-IP rate limit for the token-free public POST /mcp. Cloudflare's limiter
+  // is per-location and eventually consistent, so treat it as a smoother rather
+  // than a hard quota — the real bounds on a single request live in computeSlots.
+  "ratelimits": [
+    { "name": "MCP_RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }
+  ],
+
   "vars": {
     "AVAILCAL_DEFAULT_TZ": "America/Los_Angeles",
     "AVAILCAL_HORIZON_DAYS": "90",
