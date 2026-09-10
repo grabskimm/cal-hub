@@ -74,6 +74,11 @@
     "SCHEDULE_DAYS": "1-5",
     "SCHEDULE_MAX_RANGE_DAYS": "62",
 
+    // MCP endpoint (POST /mcp on PUBLIC_FEED_HOST). Read-only and token-free: it
+    // serves the same anonymized data as /slots.json. Flip to "false" and
+    // redeploy to disable it — this is the kill switch.
+    "MCP_ENABLED": "true",
+
     // Public page heading + the timezone fallback when a viewer's local zone
     // can't be resolved.
     // Your name personalises headings: "Book a time with <OWNER_NAME>",

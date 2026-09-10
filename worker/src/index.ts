@@ -20,6 +20,7 @@
  * Worker serves + accepts uploads via its R2 binding. Both touch one bucket.
  */
 import { Container, getContainer } from '@cloudflare/containers';
+import { createMcpHandler } from 'agents/mcp/server';
 
 import { verifyAccessJwt } from './access';
 import { availabilityHtml } from './availability-page';
@@ -55,6 +56,7 @@ import {
   verifyTurnstile,
   zoomEnabled,
 } from './scheduling';
+import { createMcpServer, scheduleConfig } from './mcp';
 import { type Busy, type Slot, computeSlots, parseDays } from './slots';
 
 export interface Env {
@@ -140,6 +142,10 @@ export interface Env {
   // a URL token. Empty = disabled (token-only, unchanged).
   ACCESS_TEAM_DOMAIN?: string; // https://<team>.cloudflareaccess.com
   ACCESS_AUD?: string; // the Access application's Audience (AUD) tag
+
+  // --- MCP endpoint (POST /mcp on the public host) ---
+  // Off unless "true". Doubles as the kill switch: flip it and redeploy.
+  MCP_ENABLED?: string;
 }
 
 const MERGED_KEY = 'merged/availability.ics';
@@ -154,6 +160,16 @@ const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '86400',
+};
+
+// MCP needs POST plus protocol headers. Kept SEPARATE from CORS above: that one
+// guards the read-only feeds and the HTML pages, and must stay GET-only.
+const MCP_CORS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers':
+    'Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name, Last-Event-ID',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -262,6 +278,13 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
   // uploads, and /run are all unreachable, so the public hostname can never
   // expose labels or accept writes.
   if (env.PUBLIC_FEED_HOST && url.hostname === env.PUBLIC_FEED_HOST) {
+    // MCP first: the generic OPTIONS short-circuit below answers every preflight
+    // with the GET-only CORS block, which would reject the MCP preflight.
+    if (path === '/mcp' && mcpEnabled(env)) {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: MCP_CORS });
+      if (request.method === 'POST') return handleMcp(request, env, ctx);
+      return new Response('MCP is POST-only.', { status: 405, headers: MCP_CORS });
+    }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (isRead) {
       if (path === '/') {
@@ -766,6 +789,53 @@ function contactAvailable(env: Env): boolean {
 function contactHref(env: Env): string {
   const base = publicBase(env);
   return base && contactAvailable(env) ? `${base}/contact` : '';
+}
+
+/** MCP is opt-in, and the flag doubles as a kill switch. */
+function mcpEnabled(env: Env): boolean {
+  return (env.MCP_ENABLED ?? '').trim().toLowerCase() === 'true';
+}
+
+/**
+ * Stateless MCP endpoint. The SDK handler speaks both the current (2026-07-28)
+ * and legacy protocol eras, so shipping clients that still open with
+ * `initialize` work alongside ones that use `server/discover`.
+ *
+ * The server is built per request (nothing may be shared across requests), and
+ * reads ONLY the anonymized public feed — the labeled merged/busy.json key is
+ * never named here, and this route lives inside the public-host branch.
+ */
+async function handleMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const handler = createMcpHandler(
+    async () => {
+      const obj = await env.AVAILCAL_BUCKET.get(PUBLIC_FREEBUSY_KEY);
+      const busy: Busy[] = obj ? await obj.json() : [];
+      return createMcpServer({
+        cfg: scheduleConfig(env),
+        busy,
+        nowMs: Date.now(),
+        asOf: obj?.uploaded ? obj.uploaded.toISOString() : undefined,
+        // Fail CLOSED: an absent feed must not read as "completely free".
+        dataUnavailable: !obj,
+      });
+    },
+    {
+      route: '/mcp',
+      // Third-party browser clients send THEIR origin (claude.ai, chatgpt.com),
+      // so an allowlist naming our own hostname would admit nobody. The endpoint
+      // is token-free, read-only and anonymized — it serves exactly what
+      // /slots.json already serves with Allow-Origin: * — so there is nothing a
+      // DNS-rebinding attacker could reach here that they cannot already GET.
+      // Rationale recorded in docs/MCP.md.
+      allowedOriginHostnames: '*',
+      corsOptions: {
+        origin: '*',
+        methods: 'POST, OPTIONS',
+        headers: MCP_CORS['Access-Control-Allow-Headers'],
+      },
+    },
+  );
+  return handler(request, env, ctx);
 }
 
 /**
