@@ -117,6 +117,12 @@ Turnstile where it functions.
 - **Fails closed.** If the anonymized feed is missing (merge job not yet run, or
   `AVAILCAL_EMIT_PUBLIC` off) the data tools return `isError` rather than
   reporting an empty calendar as "completely free".
+- **Rate limited.** `POST /mcp` is per-IP limited (60 requests/minute) via the
+  `MCP_RATE_LIMIT` binding in `wrangler.jsonc`; over-limit requests get a
+  JSON-RPC-shaped `429` with `Retry-After`. Cloudflare's limiter is per-location
+  and eventually consistent, so treat it as a smoother, not a hard quota — and
+  note that agents behind a shared egress proxy share an IP. The hard bounds on
+  a single request live in `computeSlots` (`MAX_SCAN_DAYS`, `MAX_CANDIDATES`).
 - **Bundle cost.** The SDK takes the Worker from ~62 KiB to ~272 KiB gzipped.
   Well inside the limit, but it is a 4x step — worth remembering when judging
   cold-start CPU.

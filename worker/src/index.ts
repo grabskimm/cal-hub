@@ -146,6 +146,8 @@ export interface Env {
   // --- MCP endpoint (POST /mcp on the public host) ---
   // Off unless "true". Doubles as the kill switch: flip it and redeploy.
   MCP_ENABLED?: string;
+  // Per-IP limiter for /mcp. Optional so local dev and tests run without it.
+  MCP_RATE_LIMIT?: RateLimit;
 }
 
 const MERGED_KEY = 'merged/availability.ics';
@@ -806,6 +808,22 @@ function mcpEnabled(env: Env): boolean {
  * never named here, and this route lives inside the public-host branch.
  */
 async function handleMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // /mcp is the only token-free POST on the public host, and agents poll. The
+  // limiter is per-location and eventually consistent, so it smooths abuse
+  // rather than enforcing a quota; the hard per-request bounds live in
+  // computeSlots (MAX_SCAN_DAYS / MAX_CANDIDATES). Shaped as a JSON-RPC error so
+  // an MCP client surfaces something intelligible instead of a bare 429 body.
+  const ip = request.headers.get('CF-Connecting-IP') ?? '';
+  if (env.MCP_RATE_LIMIT && ip) {
+    const { success } = await env.MCP_RATE_LIMIT.limit({ key: ip });
+    if (!success) {
+      return jsonResponse(
+        { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Rate limit exceeded. Retry shortly.' } },
+        429,
+        { ...MCP_CORS, 'Retry-After': '60' },
+      );
+    }
+  }
   const handler = createMcpHandler(
     async () => {
       const obj = await env.AVAILCAL_BUCKET.get(PUBLIC_FREEBUSY_KEY);
