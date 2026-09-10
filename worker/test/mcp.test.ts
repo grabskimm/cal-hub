@@ -6,7 +6,9 @@ import {
   type ScheduleConfig,
   type ToolCtx,
   checkSlotAvailable,
+  listBusyBlocks,
   listOpenSlots,
+  renderBusyText,
   renderSlotsText,
   scheduleConfig,
   schedulingPolicy,
@@ -362,5 +364,84 @@ describe('every offered slot is bookable', () => {
     for (const slot of listed.slots) {
       expect(Date.parse(slot.start_utc)).not.toBe(Date.parse('2026-06-22T13:00:00Z'));
     }
+  });
+});
+
+// --- list_busy_blocks: the 24/7 scheduled picture --------------------------
+describe('list_busy_blocks', () => {
+  // Deliberately spanning night, weekend and inside-hours — the cases the
+  // free-slot tool can never surface.
+  const busy: Busy[] = [
+    { start: '2026-06-22T06:00:00Z', end: '2026-06-22T07:00:00Z' }, // 2am EDT, overnight
+    { start: '2026-06-22T13:00:00Z', end: '2026-06-22T14:00:00Z' }, // 9am EDT, in hours
+    { start: '2026-06-27T18:00:00Z', end: '2026-06-27T19:00:00Z' }, // Saturday
+  ];
+
+  it('returns blocks outside working hours and on non-bookable days', () => {
+    const r = listBusyBlocks({ from_date: '2026-06-22', to_date: '2026-06-28' }, ctx({ busy }));
+    expect(r.blocks.map((b) => b.start_utc)).toEqual([
+      '2026-06-22T06:00:00.000Z',
+      '2026-06-22T13:00:00.000Z',
+      '2026-06-27T18:00:00.000Z',
+    ]);
+    expect(r.query.hours).toBe('all');
+  });
+
+  it('surfaces exactly what list_open_slots structurally cannot', () => {
+    const c = ctx({ busy });
+    const slots = listOpenSlots({ from_date: '2026-06-22', to_date: '2026-06-28', max_results: 50 }, c);
+    // The 2am block and the Saturday block are invisible to the bookable view...
+    const slotDays = new Set(slots.slots.map((s) => s.business_weekday));
+    expect(slotDays.has(6)).toBe(false); // no Saturday
+    // ...but present in the scheduled view.
+    const blocks = listBusyBlocks({ from_date: '2026-06-22', to_date: '2026-06-28' }, c);
+    expect(blocks.blocks.some((b) => b.business_weekday === 6)).toBe(true);
+    expect(blocks.blocks.some((b) => b.start_utc === '2026-06-22T06:00:00.000Z')).toBe(true);
+  });
+
+  it('includes a block that only overlaps the window edge', () => {
+    const overnight: Busy[] = [{ start: '2026-06-21T23:00:00Z', end: '2026-06-22T01:00:00Z' }];
+    const r = listBusyBlocks({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx({ busy: overnight }));
+    expect(r.blocks).toHaveLength(1);
+  });
+
+  it('reports duration and pages with an exact cursor', () => {
+    const r = listBusyBlocks({ from_date: '2026-06-22', to_date: '2026-06-28', max_results: 1 }, ctx({ busy }));
+    expect(r.blocks[0].minutes).toBe(60);
+    expect(r.truncated).toBe(true);
+    expect(r.next_cursor).toBe('2026-06-22T06:00:00.000Z');
+    const next = listBusyBlocks(
+      { from_date: '2026-06-22', to_date: '2026-06-28', starting_after_utc: r.next_cursor! },
+      ctx({ busy }),
+    );
+    expect(next.blocks[0].start_utc).toBe('2026-06-22T13:00:00.000Z');
+  });
+
+  it('rejects a calendar-invalid date', () => {
+    expect(() => listBusyBlocks({ to_date: '9999-99-99' }, ctx())).toThrow(/real calendar date/);
+  });
+
+  it('says plainly that blocks carry no titles or calendar identity', () => {
+    const text = renderBusyText(listBusyBlocks({ from_date: '2026-06-22', to_date: '2026-06-28' }, ctx({ busy })));
+    expect(text).toMatch(/no titles/i);
+    expect(text).toMatch(/which calendar/i);
+    expect(text).toContain('[2026-06-22T06:00:00.000Z]');
+  });
+
+  it('leaks no label even from a labeled fixture', () => {
+    const leaky = [{
+      start: '2026-06-22T13:00:00Z', end: '2026-06-22T14:00:00Z',
+      source: 'clientacme', status: 'busy', summary: 'Board review',
+      attendees: ['ceo@acme.example'], location: 'HQ 12F', uid: 'abc-123',
+    }] as unknown as Busy[];
+    const r = listBusyBlocks({ from_date: '2026-06-22', to_date: '2026-06-22' }, ctx({ busy: leaky }));
+    const blob = JSON.stringify(r) + renderBusyText(r);
+    for (const secret of ['clientacme', 'Board review', 'ceo@acme.example', 'HQ 12F', 'abc-123']) {
+      expect(blob).not.toContain(secret);
+    }
+    expect(Object.keys(r.blocks[0]).sort()).toEqual([
+      'business_date', 'business_weekday', 'end_display', 'end_utc',
+      'minutes', 'start_display', 'start_utc',
+    ]);
   });
 });

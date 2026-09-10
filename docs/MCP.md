@@ -37,9 +37,29 @@ curl -sS https://availability.mendelg.tech/mcp \
 
 | Tool | Purpose |
 | --- | --- |
-| `list_open_slots` | The only bookable times, computed from the live calendar |
+| `list_open_slots` | The only **bookable** times — free slots inside working hours |
+| `list_busy_blocks` | What is **scheduled**, across the full 24 hours |
 | `check_slot_available` | Re-verify one instant before committing to it |
 | `get_scheduling_policy` | Working hours, timezone, weekdays, meeting length, booking URL |
+
+### Bookable vs scheduled
+
+These answer different questions and must not be confused:
+
+* `list_open_slots` is the **booking** view. It is confined to working hours and
+  bookable weekdays, and every start it returns lands on the grid `POST /book`
+  re-validates against — so an offered time is always a bookable time.
+* `list_busy_blocks` is the **schedule** view. It is deliberately *not* limited to
+  working hours or weekdays, so it includes evenings, nights and weekends. A gap
+  in it is **not** necessarily bookable.
+
+`list_busy_blocks` returns busy periods only — no titles, no participants, no
+locations, and no indication of which calendar a block came from. Titles,
+locations and attendees are discarded at ingestion (`normalize.py`), and source
+labels are erased by `flatten_across_sources` before the public feed is written.
+This is the same anonymized data already served token-free at `/freebusy.json`,
+which the merge job builds with no time-of-day filter — so exposing it here adds
+no disclosure, only a queryable shape for agents.
 
 `list_open_slots` accepts `from_date`, `to_date`, `part_of_day`, `weekdays`,
 `max_results` (default 10, max 50), `starting_after_utc` and `display_timezone`.
