@@ -400,10 +400,17 @@ export function renderBusyText(r: ReturnType<typeof listBusyBlocks>): string {
 
 // --- server ----------------------------------------------------------------
 
+// Server-level instructions reach the calling model verbatim, so they steer tool
+// choice more strongly than any single tool description. They MUST name both
+// views: while these said only "reports when the owner is free", agents reached
+// for list_open_slots and never saw anything outside working hours.
 const INSTRUCTIONS = [
-  'This server reports when the owner is free. It cannot book, cancel or modify anything.',
-  'All times it returns are UTC instants paired with pre-rendered local strings.',
-  'Never state, imply or infer a meeting time that did not come back in a tool result.',
+  'This server is READ-ONLY: it reports the owner’s calendar and cannot book, cancel or modify anything.',
+  'It answers two DIFFERENT questions.',
+  '(1) list_busy_blocks — the SCHEDULE: when the owner is occupied, across the FULL 24 hours, including evenings, nights and weekends. Use this whenever you are asked what is on the calendar, how busy someone is, or about any time outside working hours.',
+  '(2) list_open_slots — BOOKABLE time only: free slots inside the owner’s working hours on bookable weekdays. It cannot see evenings, nights or weekends at all, so it is the wrong tool for "what is scheduled".',
+  'A gap in list_busy_blocks is NOT necessarily bookable; only list_open_slots returns bookable times.',
+  'All times are UTC instants paired with pre-rendered local strings. Never state, imply or infer a time that did not come back in a tool result.',
   'Before committing to a time in a message or invite, confirm it with check_slot_available.',
   'Working hours and meeting length are the owner’s policy and cannot be changed through this server.',
 ].join(' ');
