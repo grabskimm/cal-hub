@@ -42,6 +42,11 @@ curl -sS https://availability.mendelg.tech/mcp \
 | `check_slot_available` | Re-verify one instant before committing to it |
 | `get_scheduling_policy` | Working hours, timezone, weekdays, meeting length, booking URL |
 
+> **If a client only ever returns working-hours results**, it is calling
+> `list_open_slots`. Ask for `list_busy_blocks` by name. The server's own
+> instructions now steer agents to the right one; a client that connected before
+> that fix may still hold the old instructions until it reconnects.
+
 ### Bookable vs scheduled
 
 These answer different questions and must not be confused:

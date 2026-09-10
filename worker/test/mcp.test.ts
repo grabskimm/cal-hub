@@ -305,6 +305,19 @@ describe('MCP is read-only by construction', () => {
     expect(code).not.toMatch(/\bfetch\s*\(/);
   });
 
+  it('server instructions name both views, so agents pick the right tool', () => {
+    // The regression behind "it only returns working hours": the instructions
+    // described an availability-only server, so agents never reached for the
+    // 24h view even though it was registered.
+    const instructions = code.slice(code.indexOf('const INSTRUCTIONS'), code.indexOf('].join'));
+    expect(instructions).toContain('list_busy_blocks');
+    expect(instructions).toContain('list_open_slots');
+    expect(instructions).toMatch(/24 hours/);
+    expect(instructions).toMatch(/evenings, nights and weekends/);
+    // and it must not claim the server only reports free time
+    expect(instructions).not.toMatch(/This server reports when the owner is free/);
+  });
+
   it('annotates every tool read-only', () => {
     const registrations = code.match(/server\.registerTool\(/g) ?? [];
     const annotations = code.match(/annotations: READ_ONLY/g) ?? [];
