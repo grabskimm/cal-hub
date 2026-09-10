@@ -100,6 +100,20 @@ default allows localhost plus the endpoint's own `workers.dev` hostname. We set
 If the endpoint ever serves labeled data or accepts writes, this decision must be
 revisited **before** that lands.
 
+## Read-only is enforced, not just declared
+
+The MCP surface never writes — that is policy, and it is held in place by tests
+(`worker/test/mcp.test.ts`) rather than by good intentions. `src/mcp.ts` is
+asserted to contain no write primitive (`.put(`, `.delete(`, `createGraphEvent`,
+`graphToken`, the notification senders), to make no outbound `fetch` of its own,
+to import only pure computation, and to annotate every tool `readOnlyHint: true` /
+`destructiveHint: false`. Adding a write to that module fails CI.
+
+This matters because `readOnlyHint` alone is **advisory** — clients may ignore it,
+so it is a UI/consent signal, never a security control. The structural guarantee
+is that the module has nothing to write *with*: `slotIsBookable` is a predicate
+returning a boolean, not a booking call.
+
 ## Booking is deliberately absent
 
 `verifyTurnstile` validates a token a human produced in a browser widget; a

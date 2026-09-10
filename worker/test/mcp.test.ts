@@ -273,3 +273,51 @@ describe('rendering', () => {
     expect(text).toMatch(/No open times/);
   });
 });
+
+// --- read-only invariant ---------------------------------------------------
+// Policy: the MCP surface NEVER writes. This is enforced structurally, not just
+// by the readOnlyHint annotation (which is advisory and clients may ignore it),
+// so that adding a write to this module fails CI rather than shipping quietly.
+describe('MCP is read-only by construction', () => {
+  const src = readFileSync(new URL('../src/mcp.ts', import.meta.url), 'utf8');
+  // Strip comments first: the module legitimately DISCUSSES POST /book in prose.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('reaches no write primitive', () => {
+    for (const forbidden of [
+      '.put(',            // R2 / KV write
+      '.delete(',         // R2 / KV delete
+      'createGraphEvent', // books on the owner's real calendar
+      'graphToken',       // credentials for the above
+      'sendBookingNotification',
+      'sendContact',
+      'verifyTurnstile',
+    ]) {
+      expect(code).not.toContain(forbidden);
+    }
+  });
+
+  it('makes no outbound network call of its own', () => {
+    expect(code).not.toMatch(/\bfetch\s*\(/);
+  });
+
+  it('annotates every tool read-only', () => {
+    const registrations = code.match(/server\.registerTool\(/g) ?? [];
+    const annotations = code.match(/annotations: READ_ONLY/g) ?? [];
+    expect(registrations.length).toBeGreaterThan(0);
+    expect(annotations.length).toBe(registrations.length);
+    expect(code).toContain('readOnlyHint: true');
+    expect(code).toContain('destructiveHint: false');
+  });
+
+  it('imports only pure computation, never a writer', () => {
+    const imports = [...code.matchAll(/^import .*? from '([^']+)';$/gm)].map((m) => m[1]);
+    expect(imports.sort()).toEqual([
+      './chat',
+      './scheduling',
+      './slots',
+      '@modelcontextprotocol/server',
+      'zod',
+    ]);
+  });
+});
