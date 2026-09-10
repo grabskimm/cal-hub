@@ -6,6 +6,7 @@ import {
   type ScheduleConfig,
   type ToolCtx,
   checkSlotAvailable,
+  MCP_SERVER_VERSION,
   listBusyBlocks,
   listOpenSlots,
   renderBusyText,
@@ -303,6 +304,14 @@ describe('MCP is read-only by construction', () => {
 
   it('makes no outbound network call of its own', () => {
     expect(code).not.toMatch(/\bfetch\s*\(/);
+  });
+
+  it('advertises a version that changed with the tool set', () => {
+    // Clients cache tools/list and several key that cache on serverInfo. When
+    // list_busy_blocks shipped under the unchanged 1.0.0, clients kept serving
+    // the old three-tool list even after re-reading the instructions.
+    expect(MCP_SERVER_VERSION).not.toBe('1.0.0');
+    expect(code).toContain('version: MCP_SERVER_VERSION');
   });
 
   it('server instructions name both views, so agents pick the right tool', () => {
