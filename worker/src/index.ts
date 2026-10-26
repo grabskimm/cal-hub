@@ -23,7 +23,7 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { createMcpHandler } from 'agents/mcp/server';
 
 import { verifyAccessJwt } from './access';
-import { csrfOk, RUN_CSRF_HEADER } from './admin-auth';
+import { RUN_CSRF_HEADER, runAuthPlan } from './admin-auth';
 import { availabilityHtml } from './availability-page';
 import { type BookingPageCfg, bookingHtml } from './booking';
 import {
@@ -492,7 +492,12 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     if (!safeEqual(token, env.FEED_TOKEN) && !(await verifyAccessJwt(request, env))) {
       return new Response('forbidden', { status: 403 });
     }
-    return serveObject(env, MERGED_BUSY_KEY, 'application/json; charset=utf-8');
+    // no-store: the "Refresh now" button re-reads this URL immediately after a
+    // merge, and a 300s cached body would have it report pre-merge data as
+    // "Synced" (while /notifications.json, already no-store, shows the new
+    // event). Only this one private page consumes it; the .ics feeds keep the
+    // shared serveObject default.
+    return serveObject(env, MERGED_BUSY_KEY, 'application/json; charset=utf-8', { 'Cache-Control': 'no-store' });
   }
 
   // --- newly-added busy blocks since the last run (backs the "new events"
@@ -541,7 +546,17 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       canRun: Boolean(accessUser),
     });
     return new Response(html, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        // This page carries a one-click control that changes server state
+        // (POST /run) on an ambient cookie, and csrfOk cannot tell a redressed
+        // click from a real one — the request genuinely comes from this page.
+        // So deny framing. Scoped to /calendar: the PUBLIC pages are meant to
+        // be embeddable (see worker/README.md).
+        'X-Frame-Options': 'DENY',
+        'Content-Security-Policy': "frame-ancestors 'none'",
+      },
     });
   }
 
@@ -566,19 +581,22 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
   // second path needs CSRF defences and a rate limit.
   if (request.method === 'POST' && path === '/run') {
     const tok = bearer(request);
-    let who: string | null = tok && safeEqual(tok, env.RUN_TOKEN) ? 'run-token' : null;
-    if (!who) {
-      // Cheap, pure check first: it rejects forged cross-site POSTs before we
-      // spend a JWKS fetch verifying their cookie.
-      if (!csrfOk({
+    // The ordering lives in runAuthPlan so a test can hold it: a valid bearer
+    // must win WITHOUT the CSRF header the documented curl never sends.
+    const plan = runAuthPlan({
+      bearerValid: Boolean(tok) && safeEqual(tok as string, env.RUN_TOKEN),
+      csrf: {
         header: request.headers.get(RUN_CSRF_HEADER),
         origin: request.headers.get('Origin'),
         selfOrigin: url.origin,
-      })) {
-        return new Response('unauthorized', { status: 401 });
-      }
-      who = await verifyAccessJwt(request, env);
-      if (!who) return new Response('unauthorized', { status: 401 });
+      },
+    });
+    if (plan.kind === 'reject') return new Response('unauthorized', { status: 401 });
+    let who = 'run-token';
+    if (plan.kind === 'try-access') {
+      const email = await verifyAccessJwt(request, env);
+      if (!email) return new Response('unauthorized', { status: 401 });
+      who = email;
       // The token path is the owner's own shell; the cookie path is reachable by
       // anyone the Access policy admits, and a merge spins up a Container and
       // refetches every feed. Cap it.

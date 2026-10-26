@@ -8,6 +8,7 @@
  * tested AND embedded verbatim into the page via `.toString()`.
  */
 import { SHARED_CSS, THEME_BTN, THEME_HEAD, THEME_JS, TZ_PICKER_JS } from './availability-page';
+import { RUN_CSRF_HEADER, RUN_CSRF_VALUE } from './admin-auth';
 import { outlookComposeUrl } from './calendar-links';
 
 /** Local calendar date (YYYY-MM-DD) and minutes-from-midnight of a UTC instant in tz. */
@@ -69,9 +70,10 @@ const runBtn = document.getElementById('runsync');
 if (runBtn) {
   runBtn.addEventListener('click', async () => {
     runBtn.disabled = true;
-    const label = runBtn.textContent;
-    runBtn.textContent = '\u27f3 Syncing\u2026';
-    runBtn.classList.add('spin');
+    const glyph = runBtn.querySelector('.g');
+    const label = runBtn.querySelector('.t');
+    label.textContent = 'Syncing\u2026';
+    glyph.classList.add('spin');
     statusEl.textContent = 'Fetching every calendar\u2026 this can take a minute.';
     // A cold Container plus every feed can be slow; never hang the UI forever.
     const ctl = new AbortController();
@@ -79,7 +81,7 @@ if (runBtn) {
     try {
       const res = await fetch('/run', {
         method: 'POST',
-        headers: { 'X-AvailCal-Run': '1' },
+        headers: { '${RUN_CSRF_HEADER}': '${RUN_CSRF_VALUE}' },
         signal: ctl.signal,
       });
       if (res.status === 401 || res.status === 403) {
@@ -89,8 +91,13 @@ if (runBtn) {
       } else if (!res.ok) {
         statusEl.textContent = 'Sync failed (HTTP ' + res.status + '). The hourly run will still try.';
       } else {
-        await Promise.all([load({ silent: true }), loadNotifications()]);
-        statusEl.textContent = 'Synced. ' + events.length + ' busy block(s).';
+        // Only claim a count the grid actually loaded: load() swallows its own
+        // errors, so a failed read-back would otherwise print a stale number
+        // under the word "Synced".
+        const [refreshed] = await Promise.all([load({ silent: true }), loadNotifications()]);
+        statusEl.textContent = refreshed
+          ? 'Synced. ' + events.length + ' busy block(s).'
+          : 'Synced \u2014 but the view could not refresh. Reload the page.';
       }
     } catch (e) {
       statusEl.textContent = e.name === 'AbortError'
@@ -98,8 +105,8 @@ if (runBtn) {
         : 'Sync failed: ' + e.message;
     } finally {
       clearTimeout(bail);
-      runBtn.classList.remove('spin');
-      runBtn.textContent = label;
+      glyph.classList.remove('spin');
+      label.textContent = 'Refresh now';
       runBtn.disabled = false;
     }
   });
@@ -186,12 +193,15 @@ ${THEME_HEAD}
   /* "Refresh now" — a topnav pill that forces a merge (POST /run). */
   .runsync { font:inherit; color:#fff; font-weight:700; font-size:.84rem; border:0; cursor:pointer;
     background:rgba(255,255,255,.16); padding:.42rem .8rem; border-radius:99px; backdrop-filter:blur(4px);
-    white-space:nowrap; opacity:.94; }
+    white-space:nowrap; opacity:.94; display:inline-flex; align-items:center; gap:.35rem; }
   .runsync:hover:not(:disabled) { opacity:1; background:rgba(255,255,255,.28); }
   .runsync:disabled { cursor:progress; opacity:.65; }
-  .runsync.spin { animation:runspin 1.1s linear infinite; }
+  /* Spin the GLYPH only: rotating the pill itself would sweep the whole button
+     end over end across its neighbours for the length of a merge. */
+  .runsync .g { display:inline-block; line-height:1; }
+  .runsync .g.spin { animation:runspin 1.1s linear infinite; }
   @keyframes runspin { to { transform:rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .runsync.spin { animation:none; } }
+  @media (prefers-reduced-motion: reduce) { .runsync .g.spin { animation:none; } }
 
   /* "new events" notifications */
   .notify { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--brand);
@@ -259,7 +269,7 @@ ${THEME_HEAD}
       ${cfg.homeHref ? `<a href="${cfg.homeHref}">⌂ Home</a>` : ''}
       ${cfg.bookHref ? `<a href="${cfg.bookHref}">📅 Booking page</a>` : ''}
       <span class="spacer"></span>
-      ${cfg.canRun ? '<button type="button" id="runsync" class="runsync" title="Fetch every calendar now instead of waiting for the hourly sync">⟳ Refresh now</button>' : ''}
+      ${cfg.canRun ? '<button type="button" id="runsync" class="runsync" title="Fetch every calendar now instead of waiting for the hourly sync"><span class="g" aria-hidden="true">⟳</span><span class="t">Refresh now</span></button>' : ''}
       ${cfg.contactHref ? `<a href="${cfg.contactHref}">✉ Contact</a>` : ''}
       ${THEME_BTN}
     </nav>
@@ -820,17 +830,21 @@ async function load(opts) {
   const silent = !!(opts && opts.silent); // background refresh: don't flicker status text
   if (!silent) statusEl.textContent = 'Loading…';
   try {
-    const res = await fetch('/busy.json?token=' + encodeURIComponent(token));
-    if (res.status === 403) { if (!silent) statusEl.textContent = 'Invalid or missing token.'; return; }
+    // no-store: "Refresh now" re-reads this URL the moment a merge finishes, so
+    // a cached body would redraw the pre-merge grid. Returns whether the view
+    // actually refreshed, so the caller cannot claim a count it did not load.
+    const res = await fetch('/busy.json?token=' + encodeURIComponent(token), { cache: 'no-store' });
+    if (res.status === 403) { if (!silent) statusEl.textContent = 'Invalid or missing token.'; return false; }
     if (res.status === 404) {
       events = []; render();
-      if (!silent) statusEl.textContent = 'No calendar data yet — trigger a sync (POST /run) or wait for the hourly update.';
-      return;
+      if (!silent) statusEl.textContent = 'No calendar data yet — trigger a sync or wait for the hourly update.';
+      return true; // an observed-empty calendar IS a result
     }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     events = await res.json();
     render();
-  } catch (e) { if (!silent) statusEl.textContent = 'Could not load: ' + e.message; }
+    return true;
+  } catch (e) { if (!silent) statusEl.textContent = 'Could not load: ' + e.message; return false; }
 }
 
 tzSel.addEventListener('change', () => { render(); renderNotifications(); });
