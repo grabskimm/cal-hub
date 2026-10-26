@@ -102,6 +102,35 @@ describe('calendarHtml', () => {
     expect(html).not.toContain('list="tz-list"');
   });
 
+  it('omits the "Refresh now" button unless the viewer is Access-authorized', () => {
+    // A ?token= viewer holds FEED_TOKEN, a READ credential. Rendering the
+    // button for them would promise an action the POST then 401s on.
+    expect(html).not.toContain('id="runsync"');
+    expect(html).not.toContain("fetch('/run'");
+  });
+
+  it('wires "Refresh now" to a same-origin POST /run carrying the CSRF header', () => {
+    const withRun = calendarHtml({
+      title: "Mendel's calendar", fallbackTz: 'UTC', canRun: true,
+    });
+    expect(withRun).toContain('id="runsync"');
+    expect(withRun).toContain('Refresh now');
+    expect(withRun).toContain("fetch('/run'");
+    expect(withRun).toContain("method: 'POST'");
+    // The custom header is the CSRF defence: it makes the request non-simple,
+    // so a cross-origin forgery must preflight and gets refused.
+    expect(withRun).toContain("'X-AvailCal-Run': '1'");
+    // Relative URL => same-origin => the CF_Authorization cookie rides along,
+    // and no token is ever put in the page.
+    expect(withRun).not.toContain('/run?token=');
+    // The UI must survive a slow or dead run rather than spinning forever.
+    expect(withRun).toContain('AbortController');
+    expect(withRun).toContain('AbortError');
+    // And it reports the documented rejections rather than a bare status code.
+    expect(withRun).toContain('429');
+    expect(withRun).toContain('sign-in expired');
+  });
+
   it('has a dismissible new-events notifications area backed by /notifications.json', () => {
     expect(html).toContain('id="notify"');
     expect(html).toContain('/notifications.json?token=');

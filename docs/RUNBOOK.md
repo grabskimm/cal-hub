@@ -54,6 +54,8 @@ npx wrangler deploy
 
 # 6. Trigger a one-off run and tail logs
 curl -X POST https://availcal.example.com/run -H "Authorization: Bearer <RUN_TOKEN>"
+# ...or, with Access configured, click "⟳ Refresh now" on /calendar — same
+# trigger, authorized by your SSO cookie instead of the token.
 npx wrangler tail
 ```
 
