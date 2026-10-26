@@ -18,6 +18,14 @@ GitHub, one-time email code, …) instead of relying only on the URL token.
 
 ### Drop the URL token — SSO only (implemented)
 
+Access also unlocks the **⟳ Refresh now** button on `/calendar`, which forces a
+merge (`POST /run`) without `RUN_TOKEN` — it rides the same `CF_Authorization`
+cookie. Anyone your Access policy admits can press it, so scope the policy to
+the people you'd hand the token to. The POST additionally requires a custom
+header and a same-origin `Origin`, which is what stops another site forging it
+with your cookie; it is rate-limited per IP (`RUN_RATE_LIMIT`), and every run
+logs the email that triggered it.
+
 The Worker can authorize `/calendar` (and the `/busy.json` it fetches) from a
 **verified Access identity** instead of the URL token. Set two non-secret vars
 so the Worker knows which Access tokens to trust:

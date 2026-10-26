@@ -143,6 +143,19 @@ npx wrangler r2 object get availcal/merged/availability.ics --file -   # sanity
 ```
 The hourly cron then keeps it fresh; you don't need to call `/run` again.
 
+**Without the token:** if Cloudflare Access is configured (`ACCESS_TEAM_DOMAIN`
++ `ACCESS_AUD`, see [`infra/cloudflare/ACCESS.md`](../infra/cloudflare/ACCESS.md)),
+the private `/calendar` page shows a **⟳ Refresh now** button that does the same
+thing. It POSTs `/run` on your SSO cookie, so there is no token to paste and
+none in a URL or a log. The button is rendered only for an SSO viewer — a
+`?token=` viewer holds `FEED_TOKEN`, which is a read credential and is not
+accepted by `/run`.
+
+Pasting `https://availcal.example.com/run` into the address bar does **nothing**
+(`404`): the trigger is POST-only on purpose, so that link previews, prefetchers
+and scanners can't fire a merge, and so the credential never has to travel in a
+query string. `GET /run` matches no route.
+
 ### 9. Subscribe calendar clients (private feed)
 Apple Calendar / Thunderbird / Fantastical →
 `https://availcal.example.com/availability.ics?token=<FEED_TOKEN>` (or the
@@ -176,7 +189,8 @@ For local development instead of deploying: `cp .dev.vars.example .dev.vars`
 | GET | `/availability.ics?token=…` | `FEED_TOKEN` (query) | merged feed (text/calendar) |
 | GET | `/raw/<Label>.ics?token=…` | `FEED_TOKEN` (query) | per-source overlay |
 | PUT | `/raw/<source>.json` | `AGENT_TOKEN` (Bearer) | device-agent upload |
-| POST | `/run` | `RUN_TOKEN` (Bearer) | manual merge trigger |
+| POST | `/run` | `RUN_TOKEN` (Bearer) **or** Access SSO | manual merge trigger |
+| GET | `/calendar` | `FEED_TOKEN` (query) **or** Access SSO | private labeled calendar |
 | GET | `/health` | none | liveness |
 
 ## Public anonymized feed (optional)

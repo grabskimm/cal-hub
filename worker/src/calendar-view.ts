@@ -45,7 +45,66 @@ export interface CalendarPageCfg {
   homeHref?: string;
   bookHref?: string;
   contactHref?: string;
+  /**
+   * Show the "Refresh now" button, which POSTs /run to force a merge instead of
+   * waiting for the hourly cron. Only true for a viewer authorized by Cloudflare
+   * Access — the button sends no credential of its own, it relies on the same
+   * CF_Authorization cookie that loaded this page, so for a ?token= viewer the
+   * POST would just 401. See src/admin-auth.ts.
+   */
+  canRun?: boolean;
 }
+
+/**
+ * Page JS for the "Refresh now" button. Embedded ONLY when the viewer is
+ * Access-authorized, so a ?token= page carries no reference to /run at all.
+ */
+const RUN_BUTTON_JS = `
+// ---- "Refresh now": force a merge instead of waiting for the hourly cron ----
+// Sends no credential of its own. The CF_Authorization cookie that loaded this
+// page rides along (same-origin), and the custom header is what makes the POST
+// non-simple, so no other site can forge it. The button only exists when the
+// Worker said this viewer is Access-authorized.
+const runBtn = document.getElementById('runsync');
+if (runBtn) {
+  runBtn.addEventListener('click', async () => {
+    runBtn.disabled = true;
+    const label = runBtn.textContent;
+    runBtn.textContent = '\u27f3 Syncing\u2026';
+    runBtn.classList.add('spin');
+    statusEl.textContent = 'Fetching every calendar\u2026 this can take a minute.';
+    // A cold Container plus every feed can be slow; never hang the UI forever.
+    const ctl = new AbortController();
+    const bail = setTimeout(() => ctl.abort(), 120000);
+    try {
+      const res = await fetch('/run', {
+        method: 'POST',
+        headers: { 'X-AvailCal-Run': '1' },
+        signal: ctl.signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        statusEl.textContent = 'Your sign-in expired — reload the page and try again.';
+      } else if (res.status === 429) {
+        statusEl.textContent = 'Already synced a moment ago — give it a minute.';
+      } else if (!res.ok) {
+        statusEl.textContent = 'Sync failed (HTTP ' + res.status + '). The hourly run will still try.';
+      } else {
+        await Promise.all([load({ silent: true }), loadNotifications()]);
+        statusEl.textContent = 'Synced. ' + events.length + ' busy block(s).';
+      }
+    } catch (e) {
+      statusEl.textContent = e.name === 'AbortError'
+        ? 'Still running on the server — reload in a moment to see the result.'
+        : 'Sync failed: ' + e.message;
+    } finally {
+      clearTimeout(bail);
+      runBtn.classList.remove('spin');
+      runBtn.textContent = label;
+      runBtn.disabled = false;
+    }
+  });
+}
+`;
 
 export function calendarHtml(cfg: CalendarPageCfg): string {
   const cfgJson = JSON.stringify(cfg);
@@ -124,6 +183,16 @@ ${THEME_HEAD}
     display:inline-flex; align-items:center; }
   .btn-primary2:hover { filter:brightness(1.06); }
   @keyframes fade { from{opacity:0} to{opacity:1} }
+  /* "Refresh now" — a topnav pill that forces a merge (POST /run). */
+  .runsync { font:inherit; color:#fff; font-weight:700; font-size:.84rem; border:0; cursor:pointer;
+    background:rgba(255,255,255,.16); padding:.42rem .8rem; border-radius:99px; backdrop-filter:blur(4px);
+    white-space:nowrap; opacity:.94; }
+  .runsync:hover:not(:disabled) { opacity:1; background:rgba(255,255,255,.28); }
+  .runsync:disabled { cursor:progress; opacity:.65; }
+  .runsync.spin { animation:runspin 1.1s linear infinite; }
+  @keyframes runspin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .runsync.spin { animation:none; } }
+
   /* "new events" notifications */
   .notify { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--brand);
     border-radius:12px; box-shadow:var(--shadow); padding:.9rem 1rem; margin-top:1rem; }
@@ -190,6 +259,7 @@ ${THEME_HEAD}
       ${cfg.homeHref ? `<a href="${cfg.homeHref}">⌂ Home</a>` : ''}
       ${cfg.bookHref ? `<a href="${cfg.bookHref}">📅 Booking page</a>` : ''}
       <span class="spacer"></span>
+      ${cfg.canRun ? '<button type="button" id="runsync" class="runsync" title="Fetch every calendar now instead of waiting for the hourly sync">⟳ Refresh now</button>' : ''}
       ${cfg.contactHref ? `<a href="${cfg.contactHref}">✉ Contact</a>` : ''}
       ${THEME_BTN}
     </nav>
@@ -776,6 +846,7 @@ document.getElementById('today').addEventListener('click', () => { anchor = toda
 for (const id of ['day','week','month']) {
   document.getElementById('v-' + id).addEventListener('click', () => { setView(id); render(); });
 }
+${cfg.canRun ? RUN_BUTTON_JS : ''}
 // Default to Day view on phones; Week stays the default on desktop.
 if (window.matchMedia('(max-width: 700px)').matches) setView('day');
 load();

@@ -23,6 +23,7 @@ import { Container, getContainer } from '@cloudflare/containers';
 import { createMcpHandler } from 'agents/mcp/server';
 
 import { verifyAccessJwt } from './access';
+import { csrfOk, RUN_CSRF_HEADER } from './admin-auth';
 import { availabilityHtml } from './availability-page';
 import { type BookingPageCfg, bookingHtml } from './booking';
 import {
@@ -155,6 +156,9 @@ export interface Env {
   MCP_ENABLED?: string;
   // Per-IP limiter for /mcp. Optional so local dev and tests run without it.
   MCP_RATE_LIMIT?: RateLimit;
+  // Per-IP cap on the Access-authorized (token-free) POST /run. Optional: with
+  // no binding the trigger still works, just uncapped.
+  RUN_RATE_LIMIT?: RateLimit;
 }
 
 const MERGED_KEY = 'merged/availability.ics';
@@ -511,7 +515,13 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
   // Access fronts /calendar). The page re-uses whatever got it here for /busy.json.
   if (isRead && path === '/calendar') {
     const token = url.searchParams.get('token') ?? '';
-    if (!safeEqual(token, env.FEED_TOKEN) && !(await verifyAccessJwt(request, env))) {
+    // Access is checked FIRST because we need the identity, not just a verdict:
+    // an SSO viewer may force a merge from the page, a token viewer may not
+    // (FEED_TOKEN is a read credential and must not become an admin one). This
+    // costs nothing on the token path — verifyAccessJwt returns null without a
+    // fetch when Access is unconfigured or no CF_Authorization cookie is sent.
+    const accessUser = await verifyAccessJwt(request, env);
+    if (!accessUser && !safeEqual(token, env.FEED_TOKEN)) {
       return new Response('forbidden', { status: 403 });
     }
     const calName = (env.OWNER_NAME ?? '').trim();
@@ -526,6 +536,9 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
       homeHref: `/calendar${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       bookHref: base ? `${base}/book` : undefined,
       contactHref: contactHref(env) || undefined,
+      // "Refresh now" button: only for an SSO viewer, whose cookie is the very
+      // credential POST /run will accept.
+      canRun: Boolean(accessUser),
     });
     return new Response(html, {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -547,9 +560,40 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
   }
 
   // --- manual trigger (admin) ---
+  // Authorized by EITHER the RUN_TOKEN bearer (curl / CI / the runbook) OR a
+  // verified Cloudflare Access identity, so the owner can force a run from the
+  // browser with no token to paste. See src/admin-auth.ts for why only the
+  // second path needs CSRF defences and a rate limit.
   if (request.method === 'POST' && path === '/run') {
     const tok = bearer(request);
-    if (!tok || !safeEqual(tok, env.RUN_TOKEN)) return new Response('unauthorized', { status: 401 });
+    let who: string | null = tok && safeEqual(tok, env.RUN_TOKEN) ? 'run-token' : null;
+    if (!who) {
+      // Cheap, pure check first: it rejects forged cross-site POSTs before we
+      // spend a JWKS fetch verifying their cookie.
+      if (!csrfOk({
+        header: request.headers.get(RUN_CSRF_HEADER),
+        origin: request.headers.get('Origin'),
+        selfOrigin: url.origin,
+      })) {
+        return new Response('unauthorized', { status: 401 });
+      }
+      who = await verifyAccessJwt(request, env);
+      if (!who) return new Response('unauthorized', { status: 401 });
+      // The token path is the owner's own shell; the cookie path is reachable by
+      // anyone the Access policy admits, and a merge spins up a Container and
+      // refetches every feed. Cap it.
+      const ip = request.headers.get('CF-Connecting-IP') ?? who;
+      if (env.RUN_RATE_LIMIT) {
+        const { success } = await env.RUN_RATE_LIMIT.limit({ key: ip });
+        if (!success) {
+          return new Response('too many merge requests — try again in a minute', {
+            status: 429,
+            headers: { 'Retry-After': '60' },
+          });
+        }
+      }
+    }
+    console.log(`manual merge triggered by ${who}`);
     const resp = await triggerMerge(env);
     return new Response(await resp.text(), {
       status: resp.status,

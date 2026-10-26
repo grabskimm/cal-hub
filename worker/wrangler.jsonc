@@ -55,8 +55,13 @@
   // Per-IP rate limit for the token-free public POST /mcp. Cloudflare's limiter
   // is per-location and eventually consistent, so treat it as a smoother rather
   // than a hard quota — the real bounds on a single request live in computeSlots.
+  // Cap on the Access-authorized (token-free) POST /run, i.e. the "Refresh now"
+  // button on /calendar. A merge spins up the Container and refetches every
+  // feed, so this is far tighter than the MCP read limit. The RUN_TOKEN bearer
+  // path is NOT limited — that one is the owner's own shell.
   "ratelimits": [
-    { "name": "MCP_RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }
+    { "name": "MCP_RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RUN_RATE_LIMIT", "namespace_id": "1002", "simple": { "limit": 6, "period": 60 } }
   ],
 
   "vars": {
