@@ -50,3 +50,26 @@ export function csrfOk({ header, origin, selfOrigin }: RunCsrfInput): boolean {
   if (origin !== null && origin !== selfOrigin) return false;
   return true;
 }
+
+export type RunAuthPlan =
+  | { kind: 'allow-token' }
+  | { kind: 'try-access' }
+  | { kind: 'reject' };
+
+/**
+ * Which credential POST /run should be authorized by, and in WHICH ORDER.
+ *
+ * This lives in a pure function because the ordering is the whole invariant and
+ * it is otherwise invisible to tests: hoisting the CSRF check above the bearer
+ * check reads like a tidy-up ("validate CSRF first"), typechecks, and silently
+ * breaks the documented `curl -X POST /run -H "Authorization: Bearer …"`, which
+ * sends no custom header. Here, a test fails instead.
+ *
+ * A valid bearer wins outright and is NOT subject to csrfOk: the token is not
+ * ambient, so there is nothing for a hostile page to forge.
+ */
+export function runAuthPlan({ bearerValid, csrf }: { bearerValid: boolean; csrf: RunCsrfInput }): RunAuthPlan {
+  if (bearerValid) return { kind: 'allow-token' };
+  if (csrfOk(csrf)) return { kind: 'try-access' };
+  return { kind: 'reject' };
+}

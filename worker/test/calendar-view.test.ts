@@ -126,9 +126,23 @@ describe('calendarHtml', () => {
     // The UI must survive a slow or dead run rather than spinning forever.
     expect(withRun).toContain('AbortController');
     expect(withRun).toContain('AbortError');
+    // Only the glyph rotates — spinning the pill itself sweeps the whole
+    // button across its neighbours for the length of a merge.
+    expect(withRun).toContain('<span class="g"');
+    expect(withRun).toContain("glyph.classList.add('spin')");
+    expect(withRun).not.toContain("runBtn.classList.add('spin')");
+    // Never claim a block count the grid did not actually load.
+    expect(withRun).toContain('could not refresh');
     // And it reports the documented rejections rather than a bare status code.
     expect(withRun).toContain('429');
     expect(withRun).toContain('sign-in expired');
+  });
+
+  it('re-reads /busy.json uncached, so a refresh cannot redraw pre-merge data', () => {
+    // /busy.json is served public,max-age=300. "Refresh now" re-reads the same
+    // URL seconds after a merge, so without this the grid would redraw the
+    // cached pre-merge body while the status line said "Synced".
+    expect(html).toContain("{ cache: 'no-store' }");
   });
 
   it('has a dismissible new-events notifications area backed by /notifications.json', () => {

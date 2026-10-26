@@ -6,10 +6,13 @@ GitHub, one-time email code, …) instead of relying only on the URL token.
 
 **Why this is the right fit here**
 
-- **No Worker refactor.** Access is an *edge* policy that sits in front of the
+- **Minimal Worker change.** Access is an *edge* policy that sits in front of the
   Worker. Requests to `/calendar*` are challenged before they ever reach your
   code. The token-based machine endpoints — `/availability.ics?token=`,
-  `/raw/*.ics`, `PUT /raw/*.json`, `POST /run` — are **untouched**.
+  `/raw/*.ics`, `PUT /raw/*.json` — are **untouched**. `POST /run` is the one
+  exception: it still takes `RUN_TOKEN`, and *additionally* accepts an Access
+  identity so the button below can work. Read the next section before you
+  write the policy.
 - **Right tool for each caller.** SSO is for *you* in a browser; a calendar app
   subscribing to a feed can't do SSO. So: **Access for the human page, token for
   the machine feeds.**
@@ -51,9 +54,15 @@ Leave the two vars empty to keep token-only auth (unchanged).
 2. **Application domain:** `availcal.<your-domain>`  **Path:** `calendar`
    (this scopes the app to `/calendar*`). Add a second application for path
    `busy.json` if you want the data gated too.
-3. **Session duration:** e.g. 24h.
-4. **Add a policy:** Action **Allow**, rule **Emails** → `you@example.com`
-   (or **Emails ending in** `@your-domain`).
+3. **Session duration:** e.g. 24h. Note this is also how long a *revoked*
+   person keeps the merge trigger: removing them from the policy blocks
+   `/calendar` at the edge immediately, but the `CF_Authorization` JWT they
+   already hold stays cryptographically valid until it expires, and the Worker
+   verifies that JWT itself. Shorten the session if that matters; `RUN_TOKEN`
+   has no such lag, since rotating the secret is instant.
+4. **Add a policy:** Action **Allow**, rule **Emails** → `you@example.com`.
+   Prefer naming individuals over **Emails ending in** `@your-domain`: this
+   policy now also decides who can force a merge.
 5. Pick an identity provider under **Settings → Authentication** (Google,
    GitHub, or the built-in **One-time PIN** email — no IdP setup needed).
 6. Save. Visiting `/calendar` now shows the Access login first.
@@ -124,7 +133,8 @@ terraform apply \
 
 ## What stays the same
 
-- The Worker code is unchanged; **no other endpoint is affected.**
+- Every feed and upload endpoint keeps its token auth; the only endpoint Access
+  newly reaches is `POST /run` (above).
 - Keep using the URL token for `/availability.ics` (your calendar app) — Access
   is not involved there.
 - Rotate the feed token on the usual cadence — see
